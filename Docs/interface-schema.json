@@ -334,7 +334,7 @@
         "status": ["ready", "running", "converging", "failed"],
         "nodes": [{ "id": "string", "voltage_v": "number" }],
         "measurements": [{ "id": "string", "element_id": "string", "quantity": "voltage|current", "value": "number", "unit": "V|A" }],
-        "diagnostics": ["string"]
+        "diagnostics": [{ "kind": "no_ground|floating_node|singular_matrix|invalid_value|non_convergence", "node_id": "string?", "element_id": "string?", "parameter": "string?", "iterations": "integer?", "change_v": "number?" }]
       }
     }
   },

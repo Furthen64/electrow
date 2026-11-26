@@ -1,6 +1,8 @@
 pub mod json;
+pub mod solver;
 
 use json::Value;
+use solver::{Circuit, Operation};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const ENGINE_VERSION: &str = "0.2.0";
@@ -22,26 +24,15 @@ pub struct Subscription {
     pub signals: Vec<Signal>,
 }
 
-#[derive(Clone)]
-pub struct Element {
-    pub id: String,
-    pub kind: String,
-    pub node_ids: Vec<String>,
-    pub params: Vec<(String, f64)>,
-}
-
 pub struct Engine {
     circuit_id: String,
     revision: u64,
     sequence: u64,
-    simulation_time_s: f64,
-    time_step_s: f64,
     running: bool,
     status: String,
-    elements: Vec<Element>,
+    circuit: Circuit,
     subscriptions: Vec<Subscription>,
     loaded_dump: Option<String>,
-    diagnostics: Vec<String>,
 }
 
 fn obj(entries: &[(&str, Value)]) -> Value {
@@ -92,14 +83,11 @@ impl Engine {
             circuit_id: String::new(),
             revision: 0,
             sequence: 0,
-            simulation_time_s: 0.0,
-            time_step_s: 5e-6,
             running: false,
             status: "ready".to_string(),
-            elements: Vec::new(),
+            circuit: Circuit::new(),
             subscriptions: Vec::new(),
             loaded_dump: None,
-            diagnostics: Vec::new(),
         }
     }
 
@@ -112,7 +100,7 @@ impl Engine {
     }
 
     pub fn simulation_time_s(&self) -> f64 {
-        self.simulation_time_s
+        self.circuit.time_s()
     }
 
     pub fn is_running(&self) -> bool {
@@ -161,6 +149,7 @@ impl Engine {
                             text("versioned-edits-v1"),
                             text("replaceable-snapshots-v1"),
                             text("bounded-subscriptions-v1"),
+                            text("dense-mna-solver-v1"),
                         ]),
                     ),
                 ]),
@@ -217,14 +206,11 @@ impl Engine {
             .to_string();
         self.revision = 1;
         self.sequence = 0;
-        self.simulation_time_s = 0.0;
-        self.time_step_s = 5e-6;
+        self.circuit = Circuit::new();
         self.running = false;
         self.status = "ready".to_string();
-        self.elements.clear();
         self.subscriptions.clear();
         self.loaded_dump = None;
-        self.diagnostics.clear();
         self.bump_sequence();
         ok(id, self.ack(id))
     }
@@ -242,8 +228,7 @@ impl Engine {
             return fail(id, "bad_request", "format must be 'text' or 'xml'");
         }
         self.loaded_dump = Some(dump);
-        self.elements.clear();
-        self.simulation_time_s = 0.0;
+        self.circuit.reset();
         self.running = false;
         self.status = "ready".to_string();
         self.revision += 1;
@@ -259,6 +244,7 @@ impl Engine {
             Some(ops) if !ops.is_empty() => ops.to_vec(),
             _ => return fail(id, "bad_request", "ops must be a non-empty array"),
         };
+        let mut operations = Vec::new();
         for op in &ops {
             let name = op.get("op").and_then(Value::as_str).unwrap_or("");
             let element_id = op.get("element_id").and_then(Value::as_str).unwrap_or("");
@@ -276,38 +262,31 @@ impl Engine {
                         .collect()
                 })
                 .unwrap_or_default();
-            match name {
-                "add" => self.elements.push(Element {
+            let kind = op
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            operations.push(match name {
+                "add" => Operation::Add {
                     id: element_id.to_string(),
-                    kind: op
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    node_ids,
-                    params: Vec::new(),
-                }),
-                "remove" => {
-                    if !self.elements.iter().any(|e| e.id == element_id) {
-                        return fail(id, "unknown_element", "element not found");
-                    }
-                    self.elements.retain(|e| e.id != element_id);
-                }
-                "connect" | "disconnect" => {
-                    let element = self.elements.iter_mut().find(|e| e.id == element_id);
-                    match element {
-                        Some(element) => {
-                            if name == "connect" {
-                                element.node_ids = node_ids;
-                            } else {
-                                element.node_ids.clear();
-                            }
-                        }
-                        None => return fail(id, "unknown_element", "element not found"),
-                    }
-                }
-                _ => unreachable!(),
-            }
+                    kind,
+                    nodes: node_ids,
+                },
+                "remove" => Operation::Remove {
+                    id: element_id.to_string(),
+                },
+                "connect" => Operation::Connect {
+                    id: element_id.to_string(),
+                    nodes: node_ids,
+                },
+                _ => Operation::Disconnect {
+                    id: element_id.to_string(),
+                },
+            });
+        }
+        if let Err(diagnostic) = self.circuit.apply_operations(operations) {
+            return fail(id, "bad_request", format!("{diagnostic:?}"));
         }
         self.revision += 1;
         self.bump_sequence();
@@ -323,20 +302,16 @@ impl Engine {
             Some(Value::Object(entries)) => entries.clone(),
             _ => return fail(id, "bad_request", "params must be an object"),
         };
-        let element = self.elements.iter_mut().find(|e| e.id == element_id);
-        let element = match element {
-            Some(element) => element,
-            None => return fail(id, "unknown_element", "element not found"),
-        };
+        if !self.circuit.elements.iter().any(|e| e.id == element_id) {
+            return fail(id, "unknown_element", "element not found");
+        }
         for (key, value) in params {
             let number = match value.as_f64() {
                 Some(number) if number.is_finite() => number,
                 _ => return fail(id, "bad_request", "parameter values must be finite numbers"),
             };
-            if let Some(param) = element.params.iter_mut().find(|(k, _)| *k == key) {
-                param.1 = number;
-            } else {
-                element.params.push((key, number));
+            if let Err(diagnostic) = self.circuit.set_parameter(element_id, &key, number) {
+                return fail(id, "bad_request", format!("{diagnostic:?}"));
             }
         }
         self.revision += 1;
@@ -348,7 +323,7 @@ impl Engine {
         if let Err((code, message)) = self.check_base(args, false) {
             return fail(id, code, message);
         }
-        self.simulation_time_s = 0.0;
+        self.circuit.reset();
         self.running = false;
         self.status = "ready".to_string();
         self.bump_sequence();
@@ -380,7 +355,10 @@ impl Engine {
         if steps < 1 || steps > MAX_STEPS {
             return fail(id, "bad_request", "steps must be in [1, 10000]");
         }
-        self.simulation_time_s += dt * steps as f64;
+        let outcome = self.circuit.step(dt, steps);
+        if outcome.failed {
+            self.status = "failed".to_string();
+        }
         self.bump_sequence();
         ok(id, self.ack(id))
     }
@@ -400,7 +378,7 @@ impl Engine {
             let quantity = signal.get("quantity").and_then(Value::as_str).unwrap_or("");
             let unit = signal.get("unit").and_then(Value::as_str).unwrap_or("");
             if signal_id.is_empty()
-                || !self.elements.iter().any(|e| e.id == element_id)
+                || !self.circuit.elements.iter().any(|e| e.id == element_id)
                 || !matches!(quantity, "voltage" | "current")
                 || !matches!(unit, "V" | "A")
             {
@@ -434,29 +412,27 @@ impl Engine {
     }
 
     fn snapshot(&self) -> Value {
-        let mut node_ids = Vec::new();
-        for element in &self.elements {
-            for node in &element.node_ids {
-                if !node_ids.contains(node) {
-                    node_ids.push(node.clone());
-                }
-            }
-        }
-        node_ids.sort();
         let nodes = Value::Array(
-            node_ids
+            self.circuit
+                .node_voltages()
                 .iter()
-                .map(|node| obj(&[("id", text(node.clone())), ("voltage_v", num(0.0))]))
+                .map(|(node, voltage)| {
+                    obj(&[("id", text(node.clone())), ("voltage_v", num(*voltage))])
+                })
                 .collect(),
         );
         let mut measurements = Vec::new();
         for subscription in &self.subscriptions {
             for signal in &subscription.signals {
+                let value = self
+                    .circuit
+                    .measurement(&signal.element_id, &signal.quantity)
+                    .unwrap_or(0.0);
                 measurements.push(obj(&[
                     ("id", text(signal.id.clone())),
                     ("element_id", text(signal.element_id.clone())),
                     ("quantity", text(signal.quantity.clone())),
-                    ("value", num(0.0)),
+                    ("value", num(value)),
                     ("unit", text(signal.unit.clone())),
                 ]));
             }
@@ -466,15 +442,15 @@ impl Engine {
             ("circuit_id", text(self.circuit_id.clone())),
             ("revision", num(self.revision as f64)),
             ("sequence", num(self.sequence as f64)),
-            ("simulation_time_s", num(self.simulation_time_s)),
-            ("time_step_s", num(self.time_step_s)),
+            ("simulation_time_s", num(self.circuit.time_s())),
+            ("time_step_s", num(self.circuit.current_dt())),
             ("running", Value::Bool(self.running)),
             ("status", text(self.status.clone())),
             ("nodes", nodes),
             ("measurements", Value::Array(measurements)),
             (
                 "diagnostics",
-                Value::Array(self.diagnostics.iter().map(|d| text(d.clone())).collect()),
+                Value::Array(self.circuit.diagnostics.iter().map(|d| d.to_json()).collect()),
             ),
         ])
     }

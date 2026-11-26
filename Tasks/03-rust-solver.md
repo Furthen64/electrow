@@ -1,6 +1,6 @@
 # Task 03 — Rust circuit simulation core
 
-Status: pending. Depends on 02. Begin numerical tests from task 08 immediately.
+Status: complete (2026-11-26). Depends on 02. Outputs: Docs/solver-algorithms.md, Docs/numerical-validation.md and the Rust solver in engine/src/solver.rs; 19 Rust tests plus the real-worker smoke test pass.
 
 Use the selected reference solver to document actual algorithms, node numbering, ground convention, voltage-source unknowns, matrix/RHS stamping, pivoting, convergence checks and time integration before translation. Port behavior in small stages rather than translating the entire UI-driven class hierarchy.
 

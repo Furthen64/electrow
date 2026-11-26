@@ -2,7 +2,7 @@
 
 Status: complete (2026-11-26). Depends on [Task 01](reference-analysis.md). Machine-readable contract: [interface-schema.json](interface-schema.json). Verification script: [`tests/smoke.py`](../tests/smoke.py).
 
-This document freezes the boundaries, transport and data contracts for the first implementation slice. It does not implement the numerical solver: the current engine advances simulated time and tracks revisions/measurements as a contract placeholder. Numerical work is Task 03.
+This document freezes the boundaries, transport and data contracts for the first implementation slice. Task 03 has since added a dense MNA solver (topology, stamping, LU, trapezoidal transients, diode iteration); see [solver-algorithms.md](solver-algorithms.md) and [numerical-validation.md](numerical-validation.md). The interface contract below is unchanged.
 
 ## 1. Decisions at a glance
 
@@ -62,7 +62,7 @@ sequenceDiagram
 | State | Owner | Notes |
 |---|---|---|
 | Circuit topology, element IDs, node IDs, parameters, dynamic model state | Rust `Engine` | Single writable copy; Python/browser only hold IDs and display values |
-| Matrix, RHS, LU factors, iteration counters, `t`, `timeStep` | Rust (Task 03) | Never serialized into Python state |
+| Matrix, RHS, LU factors, iteration counters, `t`, `timeStep` | Rust (dense solver implemented in Task 03) | Never serialized into Python state |
 | Revision counter, snapshot sequence counter | Rust | Authoritative; Python/browser cache them only for validation |
 | Session lifecycle, worker process, request ids, file paths | Python | One session per worker process |
 | Last applied revision/sequence, camera/zoom, widget state | Browser | Display cache; never authoritative |
@@ -213,11 +213,11 @@ The browser then opens at `http://127.0.0.1:8000/`. `ELECTROW_ENGINE` overrides 
 | Browser script syntax | `node --check web/app.js` | pass |
 | Browser behavior | Manual UI check | Not automated (no headless browser in this environment); static assets and the same API calls were exercised over HTTP by the smoke test |
 
-Known limitation: the engine is a contract placeholder. `step` advances `simulation_time_s`; node voltages and measurement values are zero until Task 03/04 connect the solver. This is intentional and recorded so nobody mistakes the scaffold for a simulator.
+Known limitation: the solver supports resistors, ideal sources, capacitors, inductors, diodes, wires and ground only. BJT/MOSFET, controlled sources, op-amps and digital models arrive in Task 04; circuit dump/XML parsing arrives in Task 05.
 
 ## 10. Deferred decisions
 
-1. Solver port shape: map `SimulationManager` stages into Rust modules; choose dense-first vs dense+sparse (Task 03, informed by Task 01's `SPARSE_THRESHOLD = 150`).
+1. Sparse strategy: dense MNA is implemented; choose a sparse path from measured circuit sizes (Task 09, informed by Task 01's `SPARSE_THRESHOLD = 150`).
 2. Nonlinear convergence rule: global `subIterations` (SEVA77) vs per-element `localSubIters` (Vactrol/LVLabs).
 3. Streaming measurements: bounded ring buffer and WebSocket/SSE delivery when scope UI needs continuous samples.
 4. Persistence: `text` vs `xml` circuit loaders and fixture corpus (Task 05).

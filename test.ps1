@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $root = $PSScriptRoot
 
-& "$root\build.ps1"
+& "$root\winbuild.ps1"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Push-Location $root

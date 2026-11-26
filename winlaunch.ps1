@@ -9,7 +9,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 
 if (-not $NoBuild) {
-    & "$root\build.ps1"
+    & "$root\winbuild.ps1"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 

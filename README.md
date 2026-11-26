@@ -23,16 +23,16 @@ python tests/smoke.py
 python -m backend
 ```
 
-Open `http://127.0.0.1:8000/`. Python talks to the Rust worker over a versioned newline-delimited JSON protocol; set `ELECTROW_ENGINE` to override the worker path. See [Docs/architecture.md](Docs/architecture.md) and [Docs/interface-schema.json](Docs/interface-schema.json). The engine is a contract placeholder, not a simulator yet.
+Open `http://127.0.0.1:8000/`. Python talks to the Rust worker over a versioned newline-delimited JSON protocol; set `ELECTROW_ENGINE` to override the worker path. See [Docs/architecture.md](Docs/architecture.md) and [Docs/interface-schema.json](Docs/interface-schema.json). The engine now has a dense MNA solver (resistive circuits, ideal sources, RC/RL transients and diodes); broader component models remain pending.
 
 ## PowerShell scripts
 
 | Script | Purpose |
 |---|---|
 | `./checkreqs.ps1` | Check cargo, rustc and Python 3.12+ |
-| `./build.ps1` | Check requirements, build Rust, syntax-check Python and JS |
+| `./winbuild.ps1` | Check requirements, build Rust, syntax-check Python and JS |
 | `./test.ps1` | Build, run Rust unit tests and the real-worker HTTP smoke test |
-| `./run.ps1` | Build and launch the local server; `-NoBuild` skips the build, `-Port 8001` changes the port |
+| `./winlaunch.ps1` | Build and launch the local server; `-NoBuild` skips the build, `-Port 8001` changes the port |
 
 ## License
 

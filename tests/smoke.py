@@ -163,7 +163,73 @@ def test_http_server():
         server.engine.stop()
 
 
+def test_solver_round_trip():
+    client = EngineClient()
+    try:
+        client.command("create", {"circuit_id": "circ-divider"})
+        ops = [
+            {"op": "add", "element_id": "gnd", "kind": "ground", "node_ids": ["gnd"]},
+            {"op": "add", "element_id": "v1", "kind": "voltage_source", "node_ids": ["n1", "gnd"]},
+            {"op": "add", "element_id": "r1", "kind": "resistor", "node_ids": ["n1", "n2"]},
+            {"op": "add", "element_id": "r2", "kind": "resistor", "node_ids": ["n2", "gnd"]},
+        ]
+        ack = client.command("topology_edit", {"base_revision": 1, "ops": ops})
+        check(ack["revision"] == 2, "divider topology must bump revision")
+        for revision, element_id, params in [
+            (2, "v1", {"voltage_v": 10}),
+            (3, "r1", {"resistance_ohm": 1000}),
+            (4, "r2", {"resistance_ohm": 1000}),
+        ]:
+            edited = client.command(
+                "parameter_edit",
+                {"base_revision": revision, "element_id": element_id, "params": params},
+            )
+            check(edited["revision"] == revision + 1, "parameter edit must bump revision")
+        client.command(
+            "subscribe",
+            {
+                "stream_id": "scope-1",
+                "signals": [
+                    {
+                        "id": "vout",
+                        "element_id": "r2",
+                        "quantity": "voltage",
+                        "unit": "V",
+                    }
+                ],
+            },
+        )
+        client.command("step", {"dt_s": 5e-6, "steps": 1})
+        snapshot = client.command("snapshot")
+        nodes = {node["id"]: node["voltage_v"] for node in snapshot["nodes"]}
+        check(abs(snapshot["simulation_time_s"] - 5e-6) < 1e-12, "solver must advance time")
+        check(abs(nodes["n2"] - 5.0) < 1e-6, "divider midpoint must be 5 V")
+        check(
+            abs(snapshot["measurements"][0]["value"] - 5.0) < 1e-6,
+            "subscription must read solved voltage",
+        )
+        check(snapshot["diagnostics"] == [], "valid divider must have no diagnostics")
+
+        client.command("create", {"circuit_id": "circ-float"})
+        client.command(
+            "topology_edit",
+            {
+                "base_revision": 1,
+                "ops": [
+                    {"op": "add", "element_id": "g", "kind": "ground", "node_ids": ["gnd"]},
+                    {"op": "add", "element_id": "r", "kind": "resistor", "node_ids": ["a", "b"]},
+                ],
+            },
+        )
+        snapshot = client.command("snapshot")
+        kinds = [diagnostic["kind"] for diagnostic in snapshot["diagnostics"]]
+        check("floating_node" in kinds, "disconnected resistor must report floating nodes")
+    finally:
+        client.stop()
+
+
 if __name__ == "__main__":
     test_engine_client()
+    test_solver_round_trip()
     test_http_server()
-    print("SMOKE OK: Rust worker, versioned protocol and local HTTP round trip")
+    print("SMOKE OK: Rust worker, versioned protocol, solver and HTTP round trip")
