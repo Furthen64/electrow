@@ -1,14 +1,20 @@
 import argparse
 import json
 import mimetypes
+import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .engine_client import PROTOCOL_VERSION, EngineClient, EngineError, SessionLostError
 
-WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+WEB_ROOT = REPO_ROOT / "web"
+CIRCUITS_ROOT = Path(os.environ.get("ELECTROW_CIRCUITS_DIR", REPO_ROOT / "circuits")).resolve()
 MAX_BODY_BYTES = 1024 * 1024
+MAX_FILE_BYTES = 1024 * 1024
+CIRCUIT_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1"}
 CLIENT_ERROR_CODES = {
     "unsupported_version",
@@ -22,6 +28,13 @@ CLIENT_ERROR_CODES = {
     "no_document",
 }
 engine = EngineClient()
+
+
+def circuit_path(name):
+    if not isinstance(name, str) or not CIRCUIT_NAME.fullmatch(name):
+        return None
+    CIRCUITS_ROOT.mkdir(parents=True, exist_ok=True)
+    return CIRCUITS_ROOT / f"{name}.json"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -51,6 +64,18 @@ class Handler(BaseHTTPRequestHandler):
             },
         )
 
+    def _call_engine(self, cmd, args, request_id):
+        try:
+            return engine.command(cmd, args, request_id=request_id)
+        except SessionLostError as exc:
+            self._error(503, "session_lost", str(exc), request_id, retryable=True)
+        except EngineError as exc:
+            status = 400 if exc.code in CLIENT_ERROR_CODES else 503
+            self._error(status, exc.code, str(exc), request_id, retryable=exc.retryable)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._error(503, "engine_unavailable", str(exc), request_id)
+        return None
+
     def _host_allowed(self):
         host = self.headers.get("Host", "").strip()
         name = host[1:-1] if host.startswith("[") else host.split(":")[0]
@@ -72,10 +97,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlparse(self.path).path
         if path == "/api/health":
-            try:
-                result = engine.hello()
-            except (OSError, RuntimeError, ValueError, SessionLostError) as exc:
-                self._error(503, "engine_unavailable", str(exc))
+            result = self._call_engine("hello", {}, "health")
+            if result is None:
                 return
             self._send_json(
                 200,
@@ -89,13 +112,22 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/snapshot":
-            try:
-                result = engine.command("snapshot")
-            except (OSError, RuntimeError, ValueError, SessionLostError) as exc:
-                self._error(503, "engine_unavailable", str(exc))
+            result = self._call_engine("snapshot", {}, "snapshot")
+            if result is None:
                 return
             self._send_json(
                 200, {"v": PROTOCOL_VERSION, "id": "snapshot", "ok": True, "result": result}
+            )
+            return
+        if path == "/api/circuits":
+            try:
+                CIRCUITS_ROOT.mkdir(parents=True, exist_ok=True)
+                names = sorted(p.stem for p in CIRCUITS_ROOT.glob("*.json") if p.is_file())
+            except OSError as exc:
+                self._error(503, "file_error", str(exc))
+                return
+            self._send_json(
+                200, {"v": PROTOCOL_VERSION, "id": "circuits", "ok": True, "names": names}
             )
             return
         self._static(path)
@@ -104,7 +136,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_allowed():
             self._reject_host()
             return
-        if urlparse(self.path).path != "/api/command":
+        path = urlparse(self.path).path
+        if path not in ("/api/command", "/api/circuit/load", "/api/circuit/save"):
             self._error(404, "not_found", "not found")
             return
         try:
@@ -126,30 +159,66 @@ class Handler(BaseHTTPRequestHandler):
             if request.get("v") != PROTOCOL_VERSION:
                 raise ValueError("unsupported protocol version")
             request_id = request.get("id")
-            cmd = request.get("cmd")
-            args = request.get("args", {})
             if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
                 raise ValueError("id must be a non-empty string of at most 128 characters")
-            if not isinstance(cmd, str) or not cmd:
-                raise ValueError("cmd must be a non-empty string")
-            if not isinstance(args, dict):
-                raise ValueError("args must be an object")
         except (ValueError, json.JSONDecodeError) as exc:
             self._error(400, "bad_request", str(exc))
             return
 
-        try:
-            result = engine.command(cmd, args, request_id=request_id)
-        except SessionLostError as exc:
-            self._error(503, "session_lost", str(exc), request_id, retryable=True)
-            return
-        except EngineError as exc:
-            status = 400 if exc.code in CLIENT_ERROR_CODES else 503
-            self._error(status, exc.code, str(exc), request_id, retryable=exc.retryable)
-            return
-        except (OSError, RuntimeError, ValueError) as exc:
-            self._error(503, "engine_unavailable", str(exc), request_id)
-            return
+        if path == "/api/command":
+            cmd = request.get("cmd")
+            args = request.get("args", {})
+            if not isinstance(cmd, str) or not cmd:
+                self._error(400, "bad_request", "cmd must be a non-empty string", request_id)
+                return
+            if not isinstance(args, dict):
+                self._error(400, "bad_request", "args must be an object", request_id)
+                return
+            result = self._call_engine(cmd, args, request_id)
+            if result is None:
+                return
+        elif path == "/api/circuit/load":
+            target = circuit_path(request.get("name"))
+            if target is None:
+                self._error(400, "bad_request", "name must contain only 1-64 safe characters", request_id)
+                return
+            try:
+                if not target.is_file():
+                    self._error(404, "not_found", "no such circuit", request_id)
+                    return
+                raw = target.read_bytes()
+                if len(raw) > MAX_FILE_BYTES:
+                    self._error(413, "invalid_request_size", "circuit file too large", request_id)
+                    return
+                dump = raw.decode("utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                self._error(400, "bad_file", str(exc), request_id)
+                return
+            result = self._call_engine(
+                "load_circuit", {"format": "electrow-json", "dump": dump}, request_id
+            )
+            if result is None:
+                return
+        else:
+            target = circuit_path(request.get("name"))
+            if target is None:
+                self._error(400, "bad_request", "name must contain only 1-64 safe characters", request_id)
+                return
+            document = self._call_engine("export_circuit", {}, request_id)
+            if document is None:
+                return
+            text = json.dumps(document, indent=2)
+            if len(text.encode("utf-8")) > MAX_FILE_BYTES:
+                self._error(413, "invalid_request_size", "circuit document too large", request_id)
+                return
+            try:
+                temporary = target.with_suffix(".json.tmp")
+                temporary.write_text(text, encoding="utf-8")
+                temporary.replace(target)
+            except OSError as exc:
+                self._error(503, "file_error", str(exc), request_id)
+                return
+            result = {"saved": target.name}
         self._send_json(
             200, {"v": PROTOCOL_VERSION, "id": request_id, "ok": True, "result": result}
         )

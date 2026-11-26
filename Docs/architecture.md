@@ -105,7 +105,7 @@ Full schema, including per-command argument validation and examples, is in [inte
 |---|---|---|
 | `hello` | — | `engine_version`, `protocol`, `capabilities` |
 | `create` | — (`circuit_id` optional) | `ack` with revision 1 |
-| `load_circuit` | `dump`, `format` (`text`/`xml`), optional `base_revision` | `ack` |
+| `load_circuit` | `dump`, `format` (`electrow-json`/`falstad-text`/`text`/`xml`), optional `base_revision` | `ack` |
 | `topology_edit` | `base_revision`, `ops[]` (`add`/`remove`/`connect`/`disconnect`, `element_id`, optional `kind`/`node_ids`) | `ack` |
 | `parameter_edit` | `base_revision`, `element_id`, `params` (SI-unit keys) | `ack` |
 | `reset` | optional `base_revision` | `ack` |
@@ -116,7 +116,23 @@ Full schema, including per-command argument validation and examples, is in [inte
 | `snapshot` | — | `snapshot` object |
 | `shutdown` | — | `ack`, then worker exits |
 
-Error codes: `unsupported_version`, `bad_request`, `unknown_command`, `stale_revision`, `unknown_element`, `unknown_stream`, `bad_document`, `invalid_document`, `no_document`, `session_lost`, `host_not_allowed`, `not_found`, `invalid_request_size`, `engine_unavailable`, `internal_error`.
+Error codes: `unsupported_version`, `bad_request`, `unknown_command`, `stale_revision`, `unknown_element`, `unknown_stream`, `bad_document`, `invalid_document`, `no_document`, `session_lost`, `host_not_allowed`, `not_found`, `invalid_request_size`, `bad_file`, `file_error`, `engine_unavailable`, `internal_error`.
+
+### HTTP endpoints (Task 06)
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /` and static files | Serves `web/` with a path-traversal guard; loopback `Host` required |
+| `GET /api/health` | `hello` round trip; reports engine version and protocol |
+| `GET /api/snapshot` | Pulls one snapshot from the worker |
+| `POST /api/command` | Versioned engine command (see §5) |
+| `GET /api/circuits` | Lists saved circuit names in `ELECTROW_CIRCUITS_DIR` (default `circuits/`) |
+| `POST /api/circuit/save` | `{"v":1,"id","name"}` — exports the loaded document to `<name>.json` atomically |
+| `POST /api/circuit/load` | `{"v":1,"id","name"}` — reads `<name>.json` and loads it as `electrow-json` |
+
+Circuit names must match `[A-Za-z0-9_-]{1,64}`; files are capped at 1 MiB and the resolved path must stay inside the circuits directory. The directory is local data and is gitignored.
+
+Measured Python↔Rust boundary overhead (`python tests/boundary_bench.py`, dev machine, debug worker): `snapshot` mean 0.104 ms / p95 0.219 ms over 500 calls; `step` (one step) mean 0.092 ms / p95 0.158 ms over 200 calls. Solver work is batched into one worker command per tick, so Python is never invoked per stamp or component.
 
 Units: protocol values are SI base units with explicit suffixes in keys/fields — `dt_s`, `simulation_time_s`, `time_step_s`, `voltage_v`, `resistance_ohm`, `capacitance_f`, measurement `unit` of `V`/`A`. Display formatting (mV, µs, kΩ) belongs to the browser.
 

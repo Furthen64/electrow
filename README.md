@@ -4,26 +4,22 @@ Electrow is a planned open-source circuit simulator with a web-based interface, 
 
 ## Project status
 
-Early development. Reference implementations are being evaluated before code integration.
+Tasks 01–05 and the Python local backend (Task 06) are complete. The browser schematic editor (Task 07) and the remaining validation, performance and release tasks are still pending.
 
-## Scaffold quick start
+## Run locally
 
-Check the local toolchain (cargo, rustc, Python 3.12+):
+Requirements: Rust (cargo/rustc) and Python 3.12+. Check the toolchain with `./checkreqs.sh` (POSIX) or `./checkreqs.ps1` (Windows), then:
 
-```powershell
-./checkreqs.ps1
-```
-
-Build and test the Rust engine worker, then launch the Python web server:
-
-```powershell
+```sh
 cargo test --workspace
 cargo build --workspace
 python tests/smoke.py
-python -m backend
+python -m backend --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/`. Python talks to the Rust worker over a versioned newline-delimited JSON protocol; set `ELECTROW_ENGINE` to override the worker path. See [Docs/architecture.md](Docs/architecture.md) and [Docs/interface-schema.json](Docs/interface-schema.json). The engine now has a dense MNA solver (resistive circuits, ideal sources, RC/RL transients and diodes); broader component models remain pending.
+Open `http://127.0.0.1:8000/`. Press **Create**, add components, subscribe, then **Run** (the backend steps the engine every 16 ms while running and the page polls snapshots every 50 ms). **Save file** / **Load file** write and read circuit JSON in `circuits/`; names are restricted to letters, digits, `_` and `-`. Set `ELECTROW_ENGINE` to override the worker path and `ELECTROW_CIRCUITS_DIR` to relocate the circuit folder.
+
+Python talks to the Rust worker over a versioned newline-delimited JSON protocol; the worker owns all simulation state. Measured boundary overhead with `python tests/boundary_bench.py` on the development machine: `snapshot` mean 0.104 ms (p95 0.219 ms), single `step` mean 0.092 ms (p95 0.158 ms) over hundreds of round trips. See [Docs/architecture.md](Docs/architecture.md) and [Docs/interface-schema.json](Docs/interface-schema.json).
 
 ## PowerShell scripts
 

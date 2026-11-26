@@ -1,5 +1,7 @@
 import json
+import os
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -9,6 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+CIRCUITS_DIR = tempfile.TemporaryDirectory()
+os.environ["ELECTROW_CIRCUITS_DIR"] = CIRCUITS_DIR.name
 
 from backend import server
 from backend.engine_client import EngineClient, EngineError
@@ -178,6 +183,74 @@ def test_run_driver():
         client.stop()
 
 
+def test_circuit_files():
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        document = {
+            "format": "electrow-circuit",
+            "version": 1,
+            "circuit_id": "file-test",
+            "elements": [
+                {"id": "g", "kind": "ground", "nodes": ["gnd"]},
+                {
+                    "id": "r",
+                    "kind": "resistor",
+                    "nodes": ["n1", "gnd"],
+                    "params": {"resistance_ohm": 1000},
+                },
+            ],
+        }
+        request(
+            base + "/api/command",
+            {"v": 1, "id": "f0", "cmd": "create", "args": {"circuit_id": "file-test"}},
+        )
+        status, _ = request(
+            base + "/api/command",
+            {
+                "v": 1,
+                "id": "f1",
+                "cmd": "load_circuit",
+                "args": {"format": "electrow-json", "dump": json.dumps(document)},
+            },
+        )
+        check(status == 200, "load before save must succeed")
+
+        status, saved = request(
+            base + "/api/circuit/save", {"v": 1, "id": "f2", "name": "test-circuit"}
+        )
+        check(status == 200 and saved["result"]["saved"] == "test-circuit.json", "save must work")
+        check((Path(CIRCUITS_DIR.name) / "test-circuit.json").is_file(), "file must be written")
+
+        status, listing = request(base + "/api/circuits")
+        check(status == 200 and "test-circuit" in listing["names"], "list must include saved name")
+
+        status, _ = request(
+            base + "/api/command",
+            {"v": 1, "id": "f3", "cmd": "create", "args": {"circuit_id": "overwritten"}},
+        )
+        status, loaded = request(
+            base + "/api/circuit/load", {"v": 1, "id": "f4", "name": "test-circuit"}
+        )
+        check(status == 200 and loaded["result"]["circuit_id"] == "file-test", "load must work")
+
+        status, bad = request(
+            base + "/api/circuit/save", {"v": 1, "id": "f5", "name": "../escape"}
+        )
+        check(status == 400 and bad["error"]["code"] == "bad_request", "unsafe name must be rejected")
+
+        status, missing = request(
+            base + "/api/circuit/load", {"v": 1, "id": "f6", "name": "does-not-exist"}
+        )
+        check(status == 404, "missing circuit must be 404")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        server.engine.stop()
+
+
 def test_solver_round_trip():
     client = EngineClient()
     try:
@@ -248,4 +321,5 @@ if __name__ == "__main__":
     test_run_driver()
     test_solver_round_trip()
     test_http_server()
+    test_circuit_files()
     print("SMOKE OK: Rust worker, versioned protocol, solver and HTTP round trip")
