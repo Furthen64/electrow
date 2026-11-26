@@ -15,7 +15,6 @@ if (-not $NoBuild) {
 
 Push-Location $root
 try {
-    Write-Host "Electrow UI at http://$Address`:$Port/ (Ctrl+C to stop)"
     python -m backend --host $Address --port $Port
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
