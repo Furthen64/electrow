@@ -174,6 +174,26 @@ w 112 368 240 368 0
     }
 
     #[test]
+    fn ground_post_merges_with_component_endpoints() {
+        for lines in [
+            "g 112 368 112 368 0\nv 112 368 112 48 0 0 40.0 10.0 0.0\nw 112 368 240 368 0\n",
+            "v 112 368 112 48 0 0 40.0 10.0 0.0\nw 112 368 240 368 0\ng 112 368 112 368 0\n",
+        ] {
+            let text = format!("$ 1 5.0E-6 10 63 10.0 62\n{lines}");
+            let import = parse_falstad_text(&text).expect("ground dump must import");
+            let source = import
+                .document
+                .elements
+                .iter()
+                .find(|e| e.kind == "voltage_source")
+                .unwrap();
+            let wire = import.document.elements.iter().find(|e| e.kind == "wire").unwrap();
+            assert_eq!(source.nodes[0], "gnd");
+            assert_eq!(wire.nodes[0], "gnd");
+        }
+    }
+
+    #[test]
     fn reports_unsupported_scope_and_numeric_ids() {
         let text = "\
 $ 1 5.0E-6 10 63 10.0
@@ -219,6 +239,18 @@ w 100 100 100 60 0
         // Wire's first endpoint equals the BJT base post; it must merge.
         let wire = import.document.elements.iter().find(|e| e.kind == "wire").unwrap();
         assert_eq!(wire.nodes[0], bjt.nodes[0]);
+    }
+
+    #[test]
+    fn short_bjt_lines_are_reported_without_panicking() {
+        for tail in ["", " -1"] {
+            let text = format!("$ 0 5.0E-6 10 0 5.0\nt 100 100 100 200 0{tail}\n");
+            let import = parse_falstad_text(&text).expect("short BJT line must not panic");
+            assert!(import.document.elements.is_empty());
+            assert_eq!(import.unsupported.len(), 1);
+            assert_eq!(import.unsupported[0].type_token, "t");
+            assert!(import.unsupported[0].reason.contains("beta"));
+        }
     }
 
     #[test]

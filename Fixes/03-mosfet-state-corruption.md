@@ -1,6 +1,6 @@
 # Fix 03 — Store gate voltage in MOSFET state
 
-Status: pending
+Status: complete (2026-11-26). `commit()` now stores `entry.v = vs[0]` (gate voltage), consistent with `assemble()` and `attempt_step()`. Added `solver::tests::mosfet_state_stores_gate_voltage`. `cargo test --workspace`: 75 passed, 0 failed.
 Severity: high (wrong simulation results for non-ideal gate drive)
 
 ## Problem

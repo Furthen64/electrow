@@ -1,6 +1,6 @@
 # Fix 04 — Connect imported ground symbols to their coordinate post
 
-Status: pending
+Status: complete (2026-11-26). `assign_nodes()` pre-registers every ground post as coordinate → `"gnd"` before the main loop, so endpoints share the reference node regardless of line order. Added `falstad::tests::ground_post_merges_with_component_endpoints` covering both orderings. `cargo test --workspace`: 76 passed, 0 failed.
 Severity: high (imported circuits float / go singular)
 
 ## Problem

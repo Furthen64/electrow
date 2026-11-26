@@ -1,6 +1,6 @@
 # Fix 01 — Reject short BJT dump lines without panicking
 
-Status: pending
+Status: complete (2026-11-26). Changed `elements.rs:157` to use `raw.tokens.get(1..).unwrap_or(&[])`; audited all other token accesses (guarded by length checks). Added `falstad::tests::short_bjt_lines_are_reported_without_panicking`. `cargo test --workspace`: 71 passed, 0 failed.
 Severity: high (worker crash on user input)
 
 ## Problem

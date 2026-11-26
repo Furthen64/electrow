@@ -54,9 +54,21 @@ impl Value {
     }
 }
 
+const MAX_DEPTH: usize = 128;
+
 struct Parser<'a> {
     bytes: &'a [u8],
     pos: usize,
+}
+
+fn utf8_width(byte: u8) -> Option<usize> {
+    match byte {
+        0x00..=0x7f => Some(1),
+        0xc0..=0xdf => Some(2),
+        0xe0..=0xef => Some(3),
+        0xf0..=0xf7 => Some(4),
+        _ => None,
+    }
 }
 
 pub fn parse(input: &str) -> Result<Value, String> {
@@ -65,7 +77,7 @@ pub fn parse(input: &str) -> Result<Value, String> {
         pos: 0,
     };
     parser.whitespace();
-    let value = parser.value()?;
+    let value = parser.value(0)?;
     parser.whitespace();
     if parser.pos == parser.bytes.len() {
         Ok(value)
@@ -81,12 +93,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn value(&mut self) -> Result<Value, String> {
+    fn value(&mut self, depth: usize) -> Result<Value, String> {
         self.whitespace();
         let byte = *self.bytes.get(self.pos).ok_or("unexpected end of input")?;
         match byte {
-            b'{' => self.object(),
-            b'[' => self.array(),
+            b'{' => self.object(depth + 1),
+            b'[' => self.array(depth + 1),
             b'"' => self.string().map(Value::String),
             b't' => {
                 self.literal(b"true")?;
@@ -167,10 +179,19 @@ impl<'a> Parser<'a> {
                 0..=0x1f => return Err(format!("control character in string at {}", self.pos)),
                 _ => {
                     let start = self.pos - 1;
-                    let rest = std::str::from_utf8(&self.bytes[start..]).map_err(|e| e.to_string())?;
-                    let ch = rest.chars().next().ok_or("invalid utf-8")?;
+                    let width =
+                        utf8_width(byte).ok_or_else(|| format!("invalid utf-8 at {start}"))?;
+                    let end = start + width;
+                    if end > self.bytes.len() {
+                        return Err(format!("truncated utf-8 at {start}"));
+                    }
+                    let ch = std::str::from_utf8(&self.bytes[start..end])
+                        .map_err(|e| e.to_string())?
+                        .chars()
+                        .next()
+                        .ok_or("invalid utf-8")?;
                     out.push(ch);
-                    self.pos = start + ch.len_utf8();
+                    self.pos = end;
                 }
             }
         }
@@ -192,7 +213,10 @@ impl<'a> Parser<'a> {
         Ok(value)
     }
 
-    fn array(&mut self) -> Result<Value, String> {
+    fn array(&mut self, depth: usize) -> Result<Value, String> {
+        if depth > MAX_DEPTH {
+            return Err(format!("maximum nesting depth {MAX_DEPTH} exceeded at {}", self.pos));
+        }
         self.pos += 1;
         let mut items = Vec::new();
         self.whitespace();
@@ -201,7 +225,7 @@ impl<'a> Parser<'a> {
             return Ok(Value::Array(items));
         }
         loop {
-            items.push(self.value()?);
+            items.push(self.value(depth)?);
             self.whitespace();
             match self.bytes.get(self.pos) {
                 Some(b',') => self.pos += 1,
@@ -214,7 +238,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn object(&mut self) -> Result<Value, String> {
+    fn object(&mut self, depth: usize) -> Result<Value, String> {
+        if depth > MAX_DEPTH {
+            return Err(format!("maximum nesting depth {MAX_DEPTH} exceeded at {}", self.pos));
+        }
         self.pos += 1;
         let mut entries = Vec::new();
         self.whitespace();
@@ -230,7 +257,7 @@ impl<'a> Parser<'a> {
                 return Err(format!("expected ':' at {}", self.pos));
             }
             self.pos += 1;
-            let value = self.value()?;
+            let value = self.value(depth)?;
             entries.push((key, value));
             self.whitespace();
             match self.bytes.get(self.pos) {
@@ -320,5 +347,24 @@ mod tests {
     #[test]
     fn rejects_trailing_data() {
         assert!(parse("{} {}").is_err());
+    }
+
+    #[test]
+    fn parses_multibyte_utf8() {
+        let value = parse("\"é€😀\"").unwrap();
+        assert_eq!(value, Value::String("é€😀".to_string()));
+    }
+
+    #[test]
+    fn rejects_excessive_nesting() {
+        let input = format!("{}{}", "[".repeat(MAX_DEPTH + 2), "]".repeat(MAX_DEPTH + 2));
+        assert!(parse(&input).is_err());
+    }
+
+    #[test]
+    fn parses_large_string() {
+        let text = "a".repeat(200_000);
+        let value = parse(&format!("\"{text}\"")).unwrap();
+        assert_eq!(value, Value::String(text));
     }
 }

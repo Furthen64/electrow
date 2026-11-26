@@ -1,6 +1,6 @@
 # Fix 05 — Bound solver diagnostics growth
 
-Status: pending
+Status: complete (2026-11-26). Added bounded, deduplicated `step_diagnostics` (cap 16), cleared at each `step()`; static topology diagnostics remain in `diagnostics`. `snapshot()` now uses `all_diagnostics()`. Added two regression tests. `cargo test --workspace`: 78 passed, 0 failed; `python tests/smoke.py`: SMOKE OK.
 Severity: high (unbounded response growth → protocol desync)
 
 ## Problem

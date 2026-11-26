@@ -577,7 +577,13 @@ impl Engine {
             ("measurements", Value::Array(measurements)),
             (
                 "diagnostics",
-                Value::Array(self.circuit.diagnostics.iter().map(|d| d.to_json()).collect()),
+                Value::Array(
+                    self.circuit
+                        .all_diagnostics()
+                        .iter()
+                        .map(|d| d.to_json())
+                        .collect(),
+                ),
             ),
         ])
     }

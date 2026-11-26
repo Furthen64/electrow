@@ -144,6 +144,19 @@ pub(crate) fn assign_nodes(pending: Vec<PendingRecord>) -> (Vec<CircuitElement>,
     let mut next_index = 1usize;
     let mut elements = Vec::new();
     let mut failures = Vec::new();
+
+    // Register ground posts before any other element so endpoints drawn on a
+    // ground symbol resolve to the shared reference node regardless of line
+    // order. Elements with missing geometry are reported in the main loop.
+    for record in &pending {
+        if record.element.kind == "ground" {
+            if let Ok(posts) = post_points(&record.element) {
+                for post in posts {
+                    node_ids.insert(post, "gnd".to_string());
+                }
+            }
+        }
+    }
     for (index, record) in pending.into_iter().enumerate() {
         let mut element = record.element;
         let posts = match post_points(&element) {

@@ -154,7 +154,7 @@ pub(crate) fn parse_element(
                 return Err(make_unsupported(raw, format!("bad pnp token {pnp_token:?}")));
             }
             params.insert("pnp".to_string(), if pnp == -1 { 1.0 } else { 0.0 });
-            let rest = &raw.tokens[1..];
+            let rest = raw.tokens.get(1..).unwrap_or(&[]);
             // Numeric tokens before the (optional) trailing model name.
             let mut numeric: Vec<f64> = Vec::new();
             let mut model_name: Option<String> = None;

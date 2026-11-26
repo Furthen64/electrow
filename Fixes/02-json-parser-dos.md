@@ -1,6 +1,6 @@
 # Fix 02 — Bound JSON parser depth and string scan cost
 
-Status: pending
+Status: complete (2026-11-26). Added `MAX_DEPTH = 128` threaded through `value()`/`object()`/`array()` and replaced the per-character `from_utf8(&bytes[start..])` with a width-limited slice in `string()`. Added tests for multibyte UTF-8, excessive nesting and a 200 KB string. `cargo test --workspace`: 74 passed, 0 failed.
 Severity: high (CPU/memory DoS on untrusted input)
 
 ## Problem

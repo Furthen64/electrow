@@ -4,6 +4,7 @@ use crate::json::Value;
 use crate::models;
 
 pub const DEFAULT_DT_S: f64 = 5e-6;
+const MAX_STEP_DIAGNOSTICS: usize = 16;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Diagnostic {
@@ -280,6 +281,7 @@ pub struct Circuit {
     pub current_dt: f64,
     pub settings: SolverSettings,
     pub diagnostics: Vec<Diagnostic>,
+    step_diagnostics: Vec<Diagnostic>,
     good_steps: u32,
 }
 
@@ -361,6 +363,7 @@ impl Circuit {
             current_dt: DEFAULT_DT_S,
             settings: SolverSettings::default(),
             diagnostics: Vec::new(),
+            step_diagnostics: Vec::new(),
             good_steps: 0,
         }
     }
@@ -371,6 +374,24 @@ impl Circuit {
 
     pub fn current_dt(&self) -> f64 {
         self.current_dt
+    }
+
+    pub fn all_diagnostics(&self) -> Vec<Diagnostic> {
+        let mut all = self.diagnostics.clone();
+        for diagnostic in &self.step_diagnostics {
+            if !all.contains(diagnostic) {
+                all.push(diagnostic.clone());
+            }
+        }
+        all
+    }
+
+    fn record_step_diagnostic(&mut self, diagnostic: Diagnostic) {
+        if self.step_diagnostics.len() < MAX_STEP_DIAGNOSTICS
+            && !self.step_diagnostics.contains(&diagnostic)
+        {
+            self.step_diagnostics.push(diagnostic);
+        }
     }
 
     pub fn node_voltages(&self) -> Vec<(String, f64)> {
@@ -937,7 +958,7 @@ impl Circuit {
                         let (_source, _drain, ids, _gm, _gds, _rs) =
                             Self::mosfet_calc(vs, pnp, vt, beta);
                         entry.i = ids;
-                        entry.v = vs[2] - vs[1];
+                        entry.v = vs[0];
                     }
                     _ => {
                         entry.v = voltage;
@@ -1062,6 +1083,7 @@ impl Circuit {
 
     pub fn step(&mut self, requested_dt: f64, steps: u64) -> StepOutcome {
         let mut outcome = StepOutcome::default();
+        self.step_diagnostics.clear();
         if !requested_dt.is_finite() || requested_dt <= 0.0 {
             outcome.failed = true;
             outcome.diagnostics.push(Diagnostic::InvalidValue {
@@ -1092,7 +1114,7 @@ impl Circuit {
                     Err(diagnostic) => {
                         self.state = saved_state.clone();
                         self.time_s = saved_time;
-                        self.diagnostics.push(diagnostic.clone());
+                        self.record_step_diagnostic(diagnostic.clone());
                         outcome.diagnostics.push(diagnostic);
                         dt /= 2.0;
                         if dt < self.settings.min_dt_s {
@@ -1325,6 +1347,33 @@ mod tests {
     }
 
     #[test]
+    fn step_diagnostics_do_not_accumulate_across_calls() {
+        let mut circuit = Circuit::new();
+        circuit
+            .apply_operations(vec![
+                op_add("ground", "ground", &["gnd"]),
+                op_add("r1", "resistor", &["n1", "n2"]),
+            ])
+            .unwrap();
+        for _ in 0..100 {
+            circuit.step(5e-6, 1);
+        }
+        assert!(circuit.step_diagnostics.len() <= MAX_STEP_DIAGNOSTICS);
+        assert!(circuit.all_diagnostics().len() <= MAX_STEP_DIAGNOSTICS + circuit.diagnostics.len());
+    }
+
+    #[test]
+    fn successful_step_clears_prior_step_diagnostics() {
+        let mut circuit = diode_circuit();
+        circuit.settings.max_iterations = 1;
+        circuit.step(5e-6, 1);
+        assert!(!circuit.step_diagnostics.is_empty());
+        circuit.settings.max_iterations = 100;
+        circuit.step(5e-6, 1);
+        assert!(circuit.step_diagnostics.is_empty());
+    }
+
+    #[test]
     fn repeated_runs_are_deterministic() {
         let mut first = diode_circuit();
         let mut second = diode_circuit();
@@ -1443,6 +1492,26 @@ mod tests {
         assert!((vgs - 5.0).abs() < 1e-9);
         let ids = circuit.measurement("m1", "current").unwrap();
         assert!((ids - expected).abs() < 0.005, "ids={ids}, expected={expected}");
+    }
+
+    #[test]
+    fn mosfet_state_stores_gate_voltage() {
+        let mut circuit = Circuit::new();
+        circuit
+            .apply_operations(vec![
+                op_add("ground", "ground", &["gnd"]),
+                op_add("vg", "voltage_source", &["ng", "gnd"]),
+                op_add("vd", "voltage_source", &["nd", "gnd"]),
+                op_add("m1", "mosfet", &["ng", "gnd", "nd"]),
+            ])
+            .unwrap();
+        param(&mut circuit, "vg", VOLT, 5.0);
+        param(&mut circuit, "vd", VOLT, 3.0);
+        param(&mut circuit, "m1", "vt", 1.5);
+        param(&mut circuit, "m1", "beta", 0.02);
+        circuit.step(5e-6, 1);
+        let stored = circuit.state.elements.get("m1").unwrap().v;
+        assert!((stored - 5.0).abs() < 1e-9, "state.v must hold gate voltage, got {stored}");
     }
 
     #[test]
