@@ -8,43 +8,160 @@
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <header>
-      <h1>Electrow</h1>
-      <span id="status">disconnected</span>
+    <header class="topbar">
+      <div class="brand">
+        <h1>Electrow</h1>
+        <span class="subtitle">local circuit simulator</span>
+      </div>
+      <div class="topbar-status">
+        <span id="status" class="badge badge-muted">connecting</span>
+        <span id="engine-info" class="muted">engine: unknown</span>
+      </div>
     </header>
-    <main>
-      <section class="controls">
-        <button id="hello">Hello</button>
-        <button id="create">Create</button>
-        <button id="add">Add resistor r1</button>
-        <button id="params">Set resistance</button>
-        <button id="subscribe">Subscribe</button>
-        <button id="run">Run</button>
-        <button id="pause">Pause</button>
-        <button id="step">Step 100</button>
-        <button id="reset">Reset</button>
-        <button id="unsubscribe">Unsubscribe</button>
-        <button id="snapshot">Snapshot</button>
+
+    <main class="grid">
+      <section class="panel panel-primary">
+        <h2>Quick start</h2>
+        <p class="hint">New here? Build a working circuit in one click, then press Run.</p>
+        <div class="button-row">
+          <button id="btn-divider" class="primary">Create divider demo</button>
+          <button id="btn-new">New empty circuit</button>
+          <button id="btn-hello">Check connection</button>
+        </div>
+        <p class="hint">The demo is a 10 V source with two 1 kΩ resistors. <code>vout</code> should read 5 V.</p>
       </section>
-      <section class="controls">
-        <input id="dump" placeholder="load a circuit dump (text/xml)">
-        <button id="load">Load dump</button>
-        <input id="resistance" type="number" value="1000" min="1">
+
+      <section class="panel">
+        <h2>Simulation</h2>
+        <p class="hint">Time advances only when you step or run. Editing does not advance time.</p>
+        <div class="stat-grid">
+          <div><span class="label">Circuit</span><span id="stat-circuit" class="value">—</span></div>
+          <div><span class="label">Revision</span><span id="stat-revision" class="value">—</span></div>
+          <div><span class="label">Sequence</span><span id="stat-sequence" class="value">—</span></div>
+          <div><span class="label">Simulated time</span><span id="stat-time" class="value">—</span></div>
+          <div><span class="label">Timestep</span><span id="stat-dt" class="value">—</span></div>
+          <div><span class="label">State</span><span id="stat-status" class="badge badge-muted">—</span></div>
+        </div>
+        <div class="form-row">
+          <label>Step size (s)<input id="step-dt" type="number" value="0.000005" min="0" step="1e-6"></label>
+          <label>Steps<input id="step-count" type="number" value="100" min="1" max="10000"></label>
+        </div>
+        <div class="button-row">
+          <button id="btn-run" class="primary">Run</button>
+          <button id="btn-pause">Pause</button>
+          <button id="btn-step">Step</button>
+          <button id="btn-reset">Reset</button>
+        </div>
+        <p class="hint">Run drives the solver every 16 ms; this panel refreshes every 50 ms while running.</p>
       </section>
-      <section class="controls">
-        <input id="filename" placeholder="circuit name">
-        <button id="save-file">Save file</button>
-        <button id="load-file">Load file</button>
-        <select id="saved-circuits"><option value="">saved circuits</option></select>
-        <button id="refresh-files">Refresh list</button>
+
+      <section class="panel">
+        <h2>Build circuit</h2>
+        <p class="hint">Add an element by giving it an id and the two nodes it connects to.</p>
+        <div class="form-row">
+          <label>Element id<input id="build-id" value="r1"></label>
+          <label>Model<select id="build-kind">
+            <option value="resistor">resistor</option>
+            <option value="voltage_source">voltage_source</option>
+            <option value="current_source">current_source</option>
+            <option value="capacitor">capacitor</option>
+            <option value="inductor">inductor</option>
+            <option value="diode">diode</option>
+            <option value="switch">switch</option>
+            <option value="wire">wire</option>
+            <option value="ground">ground</option>
+          </select></label>
+          <label>Node A<input id="build-node-a" value="n1"></label>
+          <label>Node B<input id="build-node-b" value="n2"></label>
+        </div>
+        <div class="button-row"><button id="btn-add-element">Add element</button></div>
+        <hr>
+        <p class="hint">Edit a parameter of an existing element.</p>
+        <div class="form-row">
+          <label>Element id<input id="param-id" value="r1"></label>
+          <label>Parameter<select id="param-key">
+            <option value="resistance_ohm">resistance_ohm (Ω)</option>
+            <option value="voltage_v">voltage_v (V)</option>
+            <option value="current_a">current_a (A)</option>
+            <option value="capacitance_f">capacitance_f (F)</option>
+            <option value="inductance_h">inductance_h (H)</option>
+            <option value="closed">closed (0/1)</option>
+            <option value="beta">beta</option>
+            <option value="vt">vt (V)</option>
+          </select></label>
+          <label>Value<input id="param-value" type="number" value="1000"></label>
+        </div>
+        <div class="button-row"><button id="btn-set-param">Set parameter</button></div>
       </section>
-      <section>
-        <h2>Snapshot</h2>
-        <pre id="snapshot">No snapshot yet.</pre>
+
+      <section class="panel">
+        <h2>Measurements</h2>
+        <p class="hint">Subscribed signals appear here after a snapshot refresh.</p>
+        <table>
+          <thead><tr><th>Name</th><th>Element</th><th>Quantity</th><th>Value</th></tr></thead>
+          <tbody id="measurements-body"><tr><td colspan="4" class="muted">No subscriptions yet.</td></tr></tbody>
+        </table>
+        <div class="form-row">
+          <label>Element id<input id="signal-id" value="r2"></label>
+          <label>Quantity<select id="signal-quantity">
+            <option value="voltage">voltage</option>
+            <option value="current">current</option>
+          </select></label>
+        </div>
+        <div class="button-row">
+          <button id="btn-subscribe">Subscribe</button>
+          <button id="btn-unsubscribe">Unsubscribe</button>
+        </div>
       </section>
-      <section>
+
+      <section class="panel">
+        <h2>Nodes &amp; diagnostics</h2>
+        <table>
+          <thead><tr><th>Node</th><th>Voltage</th></tr></thead>
+          <tbody id="nodes-body"><tr><td colspan="2" class="muted">No nodes yet.</td></tr></tbody>
+        </table>
+        <h3>Diagnostics</h3>
+        <ul id="diagnostics-list" class="diagnostics"><li class="muted">None</li></ul>
+        <div class="button-row"><button id="btn-snapshot">Refresh snapshot</button></div>
+      </section>
+
+      <section class="panel">
+        <h2>Import / Export</h2>
+        <p class="hint">Paste a Falstad text or XML dump, or export the current circuit as Electrow JSON.</p>
+        <textarea id="dump-input" rows="5" placeholder="Paste a circuit dump here…"></textarea>
+        <div class="form-row">
+          <label>Format<select id="dump-format">
+            <option value="auto">auto-detect</option>
+            <option value="text">Falstad text</option>
+            <option value="xml">reference XML</option>
+            <option value="electrow-json">Electrow JSON</option>
+          </select></label>
+        </div>
+        <div class="button-row">
+          <button id="btn-load-dump">Load dump</button>
+          <button id="btn-export">Export JSON</button>
+        </div>
+        <pre id="export-output" class="output" hidden></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Circuit files</h2>
+        <p class="hint">Saved locally in <code>circuits/</code>. Names allow letters, digits, underscore and hyphen.</p>
+        <div class="form-row">
+          <label>Name<input id="file-name" placeholder="e.g. divider-demo"></label>
+          <label>Saved<select id="file-list"><option value="">choose…</option></select></label>
+        </div>
+        <div class="button-row">
+          <button id="btn-save-file">Save</button>
+          <button id="btn-load-file">Load</button>
+          <button id="btn-refresh-files">Refresh list</button>
+        </div>
+      </section>
+
+      <section class="panel panel-wide">
         <h2>Engine response</h2>
-        <pre id="response">No command sent yet.</pre>
+        <p class="hint">Raw result of the last command (useful when something fails).</p>
+        <pre id="response" class="output">No command sent yet.</pre>
       </section>
     </main>
   </body>
