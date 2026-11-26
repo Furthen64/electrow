@@ -1,0 +1,77 @@
+{
+  "name": "mosfet",
+  "ops": [
+    {
+      "op": "add",
+      "element_id": "g",
+      "kind": "ground",
+      "node_ids": [
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "vg",
+      "kind": "voltage_source",
+      "node_ids": [
+        "ng",
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "vd",
+      "kind": "voltage_source",
+      "node_ids": [
+        "nd",
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "m1",
+      "kind": "mosfet",
+      "node_ids": [
+        "ng",
+        "gnd",
+        "nd"
+      ]
+    }
+  ],
+  "params": [
+    {
+      "element_id": "vg",
+      "params": {
+        "voltage_v": 5.0
+      }
+    },
+    {
+      "element_id": "vd",
+      "params": {
+        "voltage_v": 3.0
+      }
+    },
+    {
+      "element_id": "m1",
+      "params": {
+        "vt": 1.5,
+        "beta": 0.02
+      }
+    }
+  ],
+  "step": {
+    "dt_s": 5e-06,
+    "steps": 50
+  },
+  "expect": {
+    "diagnostics": "empty",
+    "measurements": [
+      {
+        "element_id": "m1",
+        "quantity": "current",
+        "expected": 0.12,
+        "tolerance": 0.005
+      }
+    ]
+  }
+}

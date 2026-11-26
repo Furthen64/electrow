@@ -1,4 +1,5 @@
 pub mod json;
+pub mod models;
 pub mod solver;
 
 use json::Value;

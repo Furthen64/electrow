@@ -213,7 +213,7 @@ The browser then opens at `http://127.0.0.1:8000/`. `ELECTROW_ENGINE` overrides 
 | Browser script syntax | `node --check web/app.js` | pass |
 | Browser behavior | Manual UI check | Not automated (no headless browser in this environment); static assets and the same API calls were exercised over HTTP by the smoke test |
 
-Known limitation: the solver supports resistors, ideal sources, capacitors, inductors, diodes, wires and ground only. BJT/MOSFET, controlled sources, op-amps and digital models arrive in Task 04; circuit dump/XML parsing arrives in Task 05.
+Known limitation: the solver supports resistors, ideal sources, switches, capacitors, inductors, diodes, wires and ground only, plus simplified BJTs and MOSFETs (basic active models, no body diodes or saturation models). Controlled sources, op-amps, digital models arrive later in Task 04; circuit dump/XML parsing arrives in Task 05.
 
 ## 10. Deferred decisions
 

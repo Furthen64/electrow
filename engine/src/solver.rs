@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::json::Value;
+use crate::models;
 
 pub const DEFAULT_DT_S: f64 = 5e-6;
 
@@ -64,36 +65,11 @@ pub struct Element {
     pub params: HashMap<String, f64>,
 }
 
-fn default_params(kind: &str) -> HashMap<String, f64> {
-    let mut params = HashMap::new();
-    match kind {
-        "resistor" => {
-            params.insert("resistance_ohm".to_string(), 1000.0);
-        }
-        "voltage_source" => {
-            params.insert("voltage_v".to_string(), 5.0);
-        }
-        "current_source" => {
-            params.insert("current_a".to_string(), 1e-3);
-        }
-        "capacitor" => {
-            params.insert("capacitance_f".to_string(), 1e-6);
-        }
-        "inductor" => {
-            params.insert("inductance_h".to_string(), 1e-3);
-        }
-        "diode" => {
-            params.insert("is_a".to_string(), 1e-12);
-            params.insert("emission".to_string(), 1.0);
-        }
-        _ => {}
-    }
-    params
-}
-
 impl Element {
     pub fn new(id: String, kind: String, nodes: Vec<String>) -> Self {
-        let params = default_params(&kind);
+        let params = models::model_spec(&kind)
+            .map(|spec| spec.default_params())
+            .unwrap_or_default();
         Self {
             id,
             kind,
@@ -103,31 +79,38 @@ impl Element {
     }
 
     pub fn validate(&self) -> Result<(), Diagnostic> {
-        let check = |key: &str, positive: bool| -> Result<(), Diagnostic> {
-            match self.params.get(key) {
-                Some(value) if value.is_finite() && (!positive || *value > 0.0) => Ok(()),
-                _ => Err(Diagnostic::InvalidValue {
-                    element_id: self.id.clone(),
-                    parameter: key.to_string(),
-                }),
-            }
-        };
-        match self.kind.as_str() {
-            "resistor" => check("resistance_ohm", true),
-            "voltage_source" => check("voltage_v", false),
-            "current_source" => check("current_a", false),
-            "capacitor" => check("capacitance_f", true),
-            "inductor" => check("inductance_h", true),
-            "diode" => {
-                check("is_a", true)?;
-                check("emission", true)
-            }
-            "wire" | "ground" => Ok(()),
-            _ => Err(Diagnostic::InvalidValue {
+        let spec = models::model_spec(&self.kind).ok_or_else(|| Diagnostic::InvalidValue {
+            element_id: self.id.clone(),
+            parameter: "kind".to_string(),
+        })?;
+        if self.nodes.len() != spec.terminals.len() {
+            return Err(Diagnostic::InvalidValue {
                 element_id: self.id.clone(),
-                parameter: "kind".to_string(),
-            }),
+                parameter: "nodes".to_string(),
+            });
         }
+        for param in spec.params {
+            let value = self.params.get(param.key).copied().unwrap_or(param.default);
+            if !value.is_finite() {
+                return Err(Diagnostic::InvalidValue {
+                    element_id: self.id.clone(),
+                    parameter: param.key.to_string(),
+                });
+            }
+            if param.binary && value != 0.0 && value != 1.0 {
+                return Err(Diagnostic::InvalidValue {
+                    element_id: self.id.clone(),
+                    parameter: param.key.to_string(),
+                });
+            }
+            if param.positive && value <= 0.0 {
+                return Err(Diagnostic::InvalidValue {
+                    element_id: self.id.clone(),
+                    parameter: param.key.to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -154,6 +137,8 @@ pub enum Operation {
 pub struct ElementState {
     pub v: f64,
     pub i: f64,
+    pub v2: f64,
+    pub v3: f64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -215,6 +200,25 @@ impl Matrix {
             None
         } else {
             Some(node - 1)
+        }
+    }
+
+    fn stamp_diag(&mut self, a: usize, g: f64) {
+        if let Some(i) = self.node_row(a) {
+            self.a[i][i] += g;
+        }
+    }
+
+    fn stamp_offdiag(&mut self, a: usize, b: usize, g: f64) {
+        if let (Some(i), Some(j)) = (self.node_row(a), self.node_row(b)) {
+            self.a[i][j] += g;
+            self.a[j][i] += g;
+        }
+    }
+
+    fn stamp_rhs(&mut self, a: usize, r: f64) {
+        if let Some(i) = self.node_row(a) {
+            self.b[i] += r;
         }
     }
 
@@ -400,7 +404,19 @@ impl Circuit {
             .unwrap_or(0.0);
         let voltage = a - b;
         if quantity == "voltage" {
-            return Some(voltage);
+            return match element.kind.as_str() {
+                "bjt" => {
+                    let collector = self.state.node_voltages.get(&element.nodes[1]).copied().unwrap_or(0.0);
+                    let emitter = self.state.node_voltages.get(&element.nodes[2]).copied().unwrap_or(0.0);
+                    Some(collector - emitter)
+                }
+                "mosfet" => {
+                    let source = self.state.node_voltages.get(&element.nodes[1]).copied().unwrap_or(0.0);
+                    let drain = self.state.node_voltages.get(&element.nodes[2]).copied().unwrap_or(0.0);
+                    Some(drain - source)
+                }
+                _ => Some(voltage),
+            };
         }
         if quantity != "current" {
             return None;
@@ -409,6 +425,15 @@ impl Circuit {
             "resistor" => Some(voltage / element.params.get("resistance_ohm").copied()?),
             "current_source" => Some(element.params.get("current_a").copied()?),
             "wire" => Some(0.0),
+            "switch" => {
+                let closed = element.params.get("closed").copied().unwrap_or(1.0);
+                let resistance = element.params.get("resistance_ohm").copied().unwrap_or(1e-3);
+                if closed == 1.0 {
+                    Some(voltage / resistance)
+                } else {
+                    Some(0.0)
+                }
+            }
             _ => Some(self.state.elements.get(element_id).map(|s| s.i).unwrap_or(0.0)),
         }
     }
@@ -579,11 +604,11 @@ impl Circuit {
 
         let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
         for element in &self.elements {
-            if element.nodes.len() >= 2 {
-                let a = element.nodes[0].clone();
-                let b = element.nodes[1].clone();
-                adjacency.entry(a.clone()).or_default().push(b.clone());
-                adjacency.entry(b).or_default().push(a);
+            for (i, a) in element.nodes.iter().enumerate() {
+                for b in element.nodes.iter().skip(i + 1) {
+                    adjacency.entry(a.clone()).or_default().push(b.clone());
+                    adjacency.entry(b.clone()).or_default().push(a.clone());
+                }
             }
         }
         if let Some(reference) = self.node_ids.first() {
@@ -614,6 +639,43 @@ impl Circuit {
         self.analyze();
     }
 
+    fn mosfet_calc(
+        vs: [f64; 3],
+        pnp: f64,
+        vt: f64,
+        beta: f64,
+    ) -> (usize, usize, f64, f64, f64, f64) {
+        let pn = if pnp == 0.0 { 1.0 } else { -1.0 };
+        let mut source = 1usize;
+        let mut drain = 2usize;
+        if pn * vs[1] > pn * vs[2] {
+            source = 2;
+            drain = 1;
+        }
+        let realvgs = vs[0] - vs[source];
+        let realvds = vs[drain] - vs[source];
+        let vgs = realvgs * pn;
+        let vds = realvds * pn;
+        let (mut ids, gm, gds) = if vgs < vt {
+            let gds = 1e-8;
+            (vds * gds, 0.0, gds)
+        } else if vds < vgs - vt {
+            let gm = beta * vds;
+            let gds = beta * (vgs - vds - vt);
+            (beta * ((vgs - vt) * vds - vds * vds * 0.5), gm, gds)
+        } else {
+            let gm = beta * (vgs - vt);
+            let gds = 1e-8;
+            (0.5 * beta * (vgs - vt) * (vgs - vt) + (vds - (vgs - vt)) * gds, gm, gds)
+        };
+        let ids0 = ids;
+        if (source == 2 && pn == 1.0) || (source == 1 && pn == -1.0) {
+            ids = -ids;
+        }
+        let rs = -pn * ids0 + gds * realvds + gm * realvgs;
+        (source, drain, ids, gm, gds, rs)
+    }
+
     fn diode_parameters(element: &Element) -> (f64, f64) {
         let is = element.params.get("is_a").copied().unwrap_or(1e-12);
         let emission = element.params.get("emission").copied().unwrap_or(1.0);
@@ -640,18 +702,18 @@ impl Circuit {
                 meta.insert(element.id.clone(), ElementMeta::None);
                 continue;
             }
-            let a = *self.node_index.get(&element.nodes[0]).ok_or_else(|| {
-                Diagnostic::InvalidValue {
-                    element_id: element.id.clone(),
-                    parameter: "nodes".to_string(),
-                }
-            })?;
-            let b = *self.node_index.get(&element.nodes[1]).ok_or_else(|| {
-                Diagnostic::InvalidValue {
-                    element_id: element.id.clone(),
-                    parameter: "nodes".to_string(),
-                }
-            })?;
+            let idxs: Vec<usize> = element
+                .nodes
+                .iter()
+                .map(|node| {
+                    self.node_index.get(node).copied().ok_or_else(|| Diagnostic::InvalidValue {
+                        element_id: element.id.clone(),
+                        parameter: "nodes".to_string(),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let a = idxs[0];
+            let b = idxs[1];
             match element.kind.as_str() {
                 "resistor" => {
                     let resistance = element.params.get("resistance_ohm").copied().unwrap_or(0.0);
@@ -717,6 +779,65 @@ impl Circuit {
                     matrix.stamp_current(a, b, ieq);
                     meta.insert(element.id.clone(), ElementMeta::Passive { g, ieq });
                 }
+                "switch" => {
+                    let closed = element.params.get("closed").copied().unwrap_or(1.0);
+                    let resistance = element.params.get("resistance_ohm").copied().unwrap_or(1e-3);
+                    if closed == 1.0 {
+                        if resistance <= 0.0 || !resistance.is_finite() {
+                            return Err(Diagnostic::InvalidValue {
+                                element_id: element.id.clone(),
+                                parameter: "resistance_ohm".to_string(),
+                            });
+                        }
+                        matrix.stamp_conductance(a, b, 1.0 / resistance);
+                    }
+                    meta.insert(element.id.clone(), ElementMeta::None);
+                }
+                "bjt" => {
+                    let previous = state.elements.get(&element.id).cloned().unwrap_or_default();
+                    let beta = element.params.get("beta").copied().unwrap_or(100.0);
+                    let pnp = element.params.get("pnp").copied().unwrap_or(0.0);
+                    let is = element.params.get("is_a").copied().unwrap_or(1e-12);
+                    let emission = element.params.get("emission").copied().unwrap_or(1.0);
+                    let thermal = emission * 0.025865;
+                    let exponent = (previous.v / thermal).clamp(-100.0, 50.0);
+                    let exp = exponent.exp();
+                    let current = is * (exp - 1.0);
+                    let g = is * exp / thermal;
+                    let ieq = current - g * previous.v;
+                    let collector = idxs[1];
+                    let emitter = idxs[2];
+                    matrix.stamp_conductance(a, emitter, g);
+                    if pnp == 1.0 {
+                        matrix.stamp_current(emitter, a, ieq);
+                        matrix.stamp_current(emitter, collector, beta * current);
+                    } else {
+                        matrix.stamp_current(a, emitter, ieq);
+                        matrix.stamp_current(collector, emitter, beta * current);
+                    }
+                    meta.insert(element.id.clone(), ElementMeta::None);
+                }
+                "mosfet" => {
+                    let previous = state.elements.get(&element.id).cloned().unwrap_or_default();
+                    let pnp = element.params.get("pnp").copied().unwrap_or(0.0);
+                    let vt = element.params.get("vt").copied().unwrap_or(1.5);
+                    let beta = element.params.get("beta").copied().unwrap_or(0.02);
+                    let vs = [previous.v, previous.v2, previous.v3];
+                    let (source, drain, _ids, gm, gds, rs) =
+                        Self::mosfet_calc(vs, pnp, vt, beta);
+                    let gate = idxs[0];
+                    let source_node = idxs[source];
+                    let drain_node = idxs[drain];
+                    matrix.stamp_diag(drain_node, gds);
+                    matrix.stamp_offdiag(drain_node, source_node, -gds - gm);
+                    matrix.stamp_offdiag(drain_node, gate, gm);
+                    matrix.stamp_diag(source_node, gds + gm);
+                    matrix.stamp_offdiag(source_node, drain_node, -gds);
+                    matrix.stamp_offdiag(source_node, gate, -gm);
+                    matrix.stamp_rhs(drain_node, rs);
+                    matrix.stamp_rhs(source_node, -rs);
+                    meta.insert(element.id.clone(), ElementMeta::None);
+                }
                 _ => {
                     meta.insert(element.id.clone(), ElementMeta::None);
                 }
@@ -773,9 +894,55 @@ impl Circuit {
                     entry.i = g * voltage + ieq;
                     entry.v = voltage;
                 }
-                _ => {
-                    entry.v = voltage;
-                }
+                _ => match element.kind.as_str() {
+                    "bjt" => {
+                        let pnp = element.params.get("pnp").copied().unwrap_or(0.0);
+                        let beta = element.params.get("beta").copied().unwrap_or(100.0);
+                        let is = element.params.get("is_a").copied().unwrap_or(1e-12);
+                        let emission = element.params.get("emission").copied().unwrap_or(1.0);
+                        let base = voltages
+                            .get(self.node_index.get(&element.nodes[0]).copied().unwrap_or(0))
+                            .copied()
+                            .unwrap_or(0.0);
+                        let emitter = voltages
+                            .get(self.node_index.get(&element.nodes[2]).copied().unwrap_or(0))
+                            .copied()
+                            .unwrap_or(0.0);
+                        let pn = if pnp == 0.0 { 1.0 } else { -1.0 };
+                        let vj = pn * (base - emitter);
+                        let thermal = emission * 0.025865;
+                        let exponent = (vj / thermal).clamp(-100.0, 50.0);
+                        let current = is * (exponent.exp() - 1.0);
+                        entry.i = beta * current;
+                        entry.v = vj;
+                    }
+                    "mosfet" => {
+                        let pnp = element.params.get("pnp").copied().unwrap_or(0.0);
+                        let vt = element.params.get("vt").copied().unwrap_or(1.5);
+                        let beta = element.params.get("beta").copied().unwrap_or(0.02);
+                        let vs: [f64; 3] = [
+                            voltages
+                                .get(self.node_index.get(&element.nodes[0]).copied().unwrap_or(0))
+                                .copied()
+                                .unwrap_or(0.0),
+                            voltages
+                                .get(self.node_index.get(&element.nodes[1]).copied().unwrap_or(0))
+                                .copied()
+                                .unwrap_or(0.0),
+                            voltages
+                                .get(self.node_index.get(&element.nodes[2]).copied().unwrap_or(0))
+                                .copied()
+                                .unwrap_or(0.0),
+                        ];
+                        let (_source, _drain, ids, _gm, _gds, _rs) =
+                            Self::mosfet_calc(vs, pnp, vt, beta);
+                        entry.i = ids;
+                        entry.v = vs[2] - vs[1];
+                    }
+                    _ => {
+                        entry.v = voltage;
+                    }
+                },
             }
         }
         self.state = state.clone();
@@ -785,10 +952,10 @@ impl Circuit {
 
     fn attempt_step(&mut self, dt: f64) -> Result<(), Diagnostic> {
         let mut working = self.state.clone();
-        let diode_ids: Vec<String> = self
+        let nonlinear_ids: Vec<String> = self
             .elements
             .iter()
-            .filter(|e| e.kind == "diode")
+            .filter(|e| matches!(e.kind.as_str(), "diode" | "bjt" | "mosfet"))
             .map(|e| e.id.clone())
             .collect();
         let mut iterations = 0;
@@ -797,29 +964,91 @@ impl Circuit {
             let solution = lu_solve(&assembly.matrix.a, &assembly.matrix.b)?;
             let voltages = self.extract_voltages(&solution);
             let mut max_change = 0.0;
-            for id in &diode_ids {
+            for id in &nonlinear_ids {
                 let element = match self.elements.iter().find(|e| &e.id == id) {
                     Some(element) => element,
                     None => continue,
                 };
-                let a = self.node_index.get(&element.nodes[0]).copied().unwrap_or(0);
-                let b = self.node_index.get(&element.nodes[1]).copied().unwrap_or(0);
-                let new_voltage = voltages.get(a).copied().unwrap_or(0.0)
-                    - voltages.get(b).copied().unwrap_or(0.0);
-                let previous = working.elements.entry(id.clone()).or_default();
-                let change = (new_voltage - previous.v).abs();
-                if change > max_change {
-                    max_change = change;
+                match element.kind.as_str() {
+                    "diode" => {
+                        let a = self.node_index.get(&element.nodes[0]).copied().unwrap_or(0);
+                        let b = self.node_index.get(&element.nodes[1]).copied().unwrap_or(0);
+                        let new_voltage = voltages.get(a).copied().unwrap_or(0.0)
+                            - voltages.get(b).copied().unwrap_or(0.0);
+                        let previous = working.elements.entry(id.clone()).or_default();
+                        let change = (new_voltage - previous.v).abs();
+                        if change > max_change {
+                            max_change = change;
+                        }
+                        let limit = self.settings.max_diode_step_v;
+                        previous.v = if change > limit {
+                            previous.v + (new_voltage - previous.v).signum() * limit
+                        } else {
+                            new_voltage
+                        };
+                    }
+                    "bjt" => {
+                        let pnp = element.params.get("pnp").copied().unwrap_or(0.0);
+                        let pn = if pnp == 0.0 { 1.0 } else { -1.0 };
+                        let base = voltages
+                            .get(self.node_index.get(&element.nodes[0]).copied().unwrap_or(0))
+                            .copied()
+                            .unwrap_or(0.0);
+                        let emitter = voltages
+                            .get(self.node_index.get(&element.nodes[2]).copied().unwrap_or(0))
+                            .copied()
+                            .unwrap_or(0.0);
+                        let new_vj = pn * (base - emitter);
+                        let previous = working.elements.entry(id.clone()).or_default();
+                        let change = (new_vj - previous.v).abs();
+                        if change > max_change {
+                            max_change = change;
+                        }
+                        let limit = self.settings.max_diode_step_v;
+                        previous.v = if change > limit {
+                            previous.v + (new_vj - previous.v).signum() * limit
+                        } else {
+                            new_vj
+                        };
+                    }
+                    "mosfet" => {
+                        let beta = element.params.get("beta").copied().unwrap_or(0.02);
+                        let vs = [
+                            voltages
+                                .get(self.node_index.get(&element.nodes[0]).copied().unwrap_or(0))
+                                .copied()
+                                .unwrap_or(0.0),
+                            voltages
+                                .get(self.node_index.get(&element.nodes[1]).copied().unwrap_or(0))
+                                .copied()
+                                .unwrap_or(0.0),
+                            voltages
+                                .get(self.node_index.get(&element.nodes[2]).copied().unwrap_or(0))
+                                .copied()
+                                .unwrap_or(0.0),
+                        ];
+                        let previous = working.elements.entry(id.clone()).or_default();
+                        let change = (vs[0] - previous.v)
+                            .abs()
+                            .max((vs[1] - previous.v2).abs())
+                            .max((vs[2] - previous.v3).abs());
+                        let change_scaled = if beta > 1.0 { change * 100.0 } else { change };
+                        if change_scaled > max_change {
+                            max_change = change_scaled;
+                        }
+                        const LIMIT: f64 = 0.5;
+                        let clamp = |new: f64, old: f64| {
+                            new.clamp(old - LIMIT, old + LIMIT)
+                        };
+                        previous.v2 = clamp(vs[1], previous.v2);
+                        previous.v3 = clamp(vs[2], previous.v3);
+                        previous.v = vs[0];
+                    }
+                    _ => {}
                 }
-                let limit = self.settings.max_diode_step_v;
-                previous.v = if change > limit {
-                    previous.v + (new_voltage - previous.v).signum() * limit
-                } else {
-                    new_voltage
-                };
             }
             iterations += 1;
-            if diode_ids.is_empty() || max_change <= self.settings.convergence_tolerance_v {
+            if nonlinear_ids.is_empty() || max_change <= self.settings.convergence_tolerance_v {
                 return self.commit(&mut working, &solution, &voltages, &assembly, dt);
             }
             if iterations >= self.settings.max_iterations {
@@ -1117,5 +1346,112 @@ mod tests {
         assert_eq!(wire.nodes, vec!["n2", "n2"]);
         circuit.step(5e-6, 1);
         assert!((voltage(&circuit, "n2") - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn switch_conducts_only_when_closed() {
+        let mut circuit = Circuit::new();
+        circuit
+            .apply_operations(vec![
+                op_add("ground", "ground", &["gnd"]),
+                op_add("v1", "voltage_source", &["n1", "gnd"]),
+                op_add("r1", "resistor", &["n1", "n2"]),
+                op_add("sw1", "switch", &["n2", "gnd"]),
+            ])
+            .unwrap();
+        param(&mut circuit, "v1", VOLT, 10.0);
+        param(&mut circuit, "r1", OHM, 1000.0);
+        param(&mut circuit, "sw1", "resistance_ohm", 1e-3);
+        circuit.set_parameter("sw1", "closed", 0.0).unwrap();
+        assert!(!circuit.step(5e-6, 5).failed);
+        let open_current = circuit.measurement("r1", "current").unwrap();
+        assert!(open_current.abs() < 1e-9);
+        assert!((voltage(&circuit, "n2") - 10.0).abs() < 1e-9);
+        circuit.set_parameter("sw1", "closed", 1.0).unwrap();
+        assert!(!circuit.step(5e-6, 5).failed);
+        let closed_current = circuit.measurement("r1", "current").unwrap();
+        assert!(closed_current > 0.0);
+        assert!((voltage(&circuit, "n2")).abs() < 0.01);
+    }
+
+    #[test]
+    fn switch_toggle_rejects_invalid_binary_value() {
+        let mut circuit = Circuit::new();
+        circuit
+            .apply_operations(vec![
+                op_add("ground", "ground", &["gnd"]),
+                op_add("sw1", "switch", &["n1", "gnd"]),
+            ])
+            .unwrap();
+        assert!(matches!(
+            circuit.set_parameter("sw1", "closed", 0.5),
+            Err(Diagnostic::InvalidValue { .. })
+        ));
+    }
+
+    #[test]
+    fn bjt_converges_and_scales_with_beta() {
+        let mut circuit = Circuit::new();
+        circuit
+            .apply_operations(vec![
+                op_add("ground", "ground", &["gnd"]),
+                op_add("v1", "voltage_source", &["n1", "gnd"]),
+                op_add("r1", "resistor", &["n1", "n2"]),
+                op_add("r2", "resistor", &["n1", "n3"]),
+                op_add("q1", "bjt", &["n2", "n3", "gnd"]),
+            ])
+            .unwrap();
+        param(&mut circuit, "v1", VOLT, 10.0);
+        param(&mut circuit, "r1", OHM, 1000000.0);
+        param(&mut circuit, "r2", OHM, 1000.0);
+        param(&mut circuit, "q1", "beta", 100.0);
+        param(&mut circuit, "q1", "is_a", 1e-12);
+        let outcome = circuit.step(5e-6, 100);
+        assert!(!outcome.failed, "bjt step must converge: {:?}", outcome.diagnostics);
+        let base_voltage = voltage(&circuit, "n2");
+        let collector_voltage = voltage(&circuit, "n3");
+        assert!(base_voltage > 0.4 && base_voltage < 0.8);
+        let ic = circuit.measurement("q1", "current").unwrap();
+        assert!(ic > 0.0);
+        let ib_recomputed = 1e-12 * ((base_voltage / 0.025865).exp() - 1.0);
+        assert!((ic - 100.0 * ib_recomputed).abs() < 1e-4);
+        assert!(collector_voltage > 0.0 && collector_voltage < 10.0);
+    }
+
+    #[test]
+    fn mosfet_linear_region_matches_analytic_ids() {
+        let mut circuit = Circuit::new();
+        circuit
+            .apply_operations(vec![
+                op_add("ground", "ground", &["gnd"]),
+                op_add("vg", "voltage_source", &["ng", "gnd"]),
+                op_add("vd", "voltage_source", &["nd", "gnd"]),
+                op_add("m1", "mosfet", &["ng", "gnd", "nd"]),
+            ])
+            .unwrap();
+        param(&mut circuit, "vg", VOLT, 5.0);
+        param(&mut circuit, "vd", VOLT, 3.0);
+        param(&mut circuit, "m1", "vt", 1.5);
+        param(&mut circuit, "m1", "beta", 0.02);
+        let outcome = circuit.step(5e-6, 50);
+        assert!(!outcome.failed, "mosfet step must converge: {:?}", outcome.diagnostics);
+        let vds = voltage(&circuit, "nd") - voltage(&circuit, "gnd");
+        let vgs = voltage(&circuit, "ng") - voltage(&circuit, "gnd");
+        // linear region: ids = beta * ((vgs - vt) * vds - vds^2 / 2)
+        let expected = 0.02 * ((5.0 - 1.5) * 3.0 - 3.0 * 3.0 / 2.0);
+        assert!((vds - 3.0).abs() < 1e-9);
+        assert!((vgs - 5.0).abs() < 1e-9);
+        let ids = circuit.measurement("m1", "current").unwrap();
+        assert!((ids - expected).abs() < 0.005, "ids={ids}, expected={expected}");
+    }
+
+    #[test]
+    fn unsupported_kind_is_rejected_at_add_time() {
+        let mut circuit = Circuit::new();
+        let outcome = circuit.apply_operations(vec![op_add("bad", "vacuum_tube", &["n1", "n2"])]);
+        assert!(matches!(
+            outcome,
+            Err(Diagnostic::InvalidValue { parameter, .. }) if parameter == "kind"
+        ));
     }
 }

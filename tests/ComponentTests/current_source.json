@@ -1,0 +1,66 @@
+{
+  "name": "current_source",
+  "ops": [
+    {
+      "op": "add",
+      "element_id": "g",
+      "kind": "ground",
+      "node_ids": [
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "i1",
+      "kind": "current_source",
+      "node_ids": [
+        "n1",
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "r1",
+      "kind": "resistor",
+      "node_ids": [
+        "n1",
+        "gnd"
+      ]
+    }
+  ],
+  "params": [
+    {
+      "element_id": "i1",
+      "params": {
+        "current_a": 0.001
+      }
+    },
+    {
+      "element_id": "r1",
+      "params": {
+        "resistance_ohm": 1000.0
+      }
+    }
+  ],
+  "step": {
+    "dt_s": 5e-06,
+    "steps": 1
+  },
+  "expect": {
+    "diagnostics": "empty",
+    "nodes": {
+      "n1": {
+        "expected": -1.0,
+        "tolerance": 0.01
+      }
+    },
+    "measurements": [
+      {
+        "element_id": "i1",
+        "quantity": "current",
+        "expected": 0.001,
+        "tolerance": 0.0001
+      }
+    ]
+  }
+}

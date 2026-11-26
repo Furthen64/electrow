@@ -1,6 +1,8 @@
 # Task 04 — Electrical component models
 
-Status: pending. Depends on 03; build in batches.
+Status: complete (2026-11-26). Depends on 03. Outputs: \ngine/src/models.rs\ (model registry), \Docs/component-models.md\, new switch/BJT/MOSFET models in \ngine/src/solver.rs\; 28 Rust tests plus the real-worker smoke test pass.
+
+Scope of this slice: wires, ground, resistors, independent voltage/current sources, switches, capacitors, inductors, diodes, simplified BJTs and MOSFETs. Controlled sources, op-amps and digital gates remain deferred; body-diode/bulk, saturation and early effects remain deferred.
 
 Inventory reference model names, serialized IDs, parameters/defaults, terminal ordering, stamps, nonlinear behavior, state updates and scope outputs. Design a Rust model interface for connectivity, stamping, iteration, accepted-step updates, reset and measurement. Keep graphical symbols separate from electrical behavior.
 

@@ -1,0 +1,56 @@
+{
+  "name": "ground",
+  "ops": [
+    {
+      "op": "add",
+      "element_id": "g",
+      "kind": "ground",
+      "node_ids": [
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "v1",
+      "kind": "voltage_source",
+      "node_ids": [
+        "n1",
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "r1",
+      "kind": "resistor",
+      "node_ids": [
+        "n1",
+        "gnd"
+      ]
+    }
+  ],
+  "params": [
+    {
+      "element_id": "v1",
+      "params": {
+        "voltage_v": 5.0
+      }
+    }
+  ],
+  "step": {
+    "dt_s": 5e-06,
+    "steps": 1
+  },
+  "expect": {
+    "diagnostics": "empty",
+    "nodes": {
+      "gnd": {
+        "expected": 0.0,
+        "tolerance": 1e-12
+      },
+      "n1": {
+        "expected": 5.0,
+        "tolerance": 0.001
+      }
+    }
+  }
+}

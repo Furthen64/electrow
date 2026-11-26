@@ -1,0 +1,82 @@
+{
+  "name": "wire",
+  "ops": [
+    {
+      "op": "add",
+      "element_id": "g",
+      "kind": "ground",
+      "node_ids": [
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "v1",
+      "kind": "voltage_source",
+      "node_ids": [
+        "n1",
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "r1",
+      "kind": "resistor",
+      "node_ids": [
+        "n1",
+        "n2"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "r2",
+      "kind": "resistor",
+      "node_ids": [
+        "n2",
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "w1",
+      "kind": "wire",
+      "node_ids": [
+        "n2",
+        "n3"
+      ]
+    }
+  ],
+  "params": [
+    {
+      "element_id": "v1",
+      "params": {
+        "voltage_v": 10.0
+      }
+    },
+    {
+      "element_id": "r1",
+      "params": {
+        "resistance_ohm": 1000.0
+      }
+    },
+    {
+      "element_id": "r2",
+      "params": {
+        "resistance_ohm": 1000.0
+      }
+    }
+  ],
+  "step": {
+    "dt_s": 5e-06,
+    "steps": 1
+  },
+  "expect": {
+    "diagnostics": "empty",
+    "nodes": {
+      "n2": {
+        "expected": 5.0,
+        "tolerance": 0.01
+      }
+    }
+  }
+}

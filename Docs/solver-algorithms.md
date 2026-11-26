@@ -81,9 +81,9 @@ Parameter validation rejects non-positive resistance/capacitance/inductance and 
 
 ## 9. Scope of this slice
 
-Implemented: wires (node merging), ground, resistors, independent voltage/current sources, capacitors, inductors, diodes; linear solve; trapezoidal transient; Newton iteration; rollback and diagnostics.
+Implemented: wires (node merging), ground, resistors, independent voltage/current sources, switches, capacitors, inductors, diodes, simplified BJTs and MOSFETs; linear solve; trapezoidal transient; Newton iteration; rollback and diagnostics.
 
-Deferred: BJT/MOSFET, controlled sources, op-amps, digital models (Task 04); circuit dump/XML parsing and dumps (Task 05); browser rendering and scopes (Task 07); sparse solver and profiling (Task 09); Vactrol/avalanche/audio (Task 10).
+Deferred: controlled sources, op-amps, digital models (Task 04); circuit dump/XML parsing and dumps (Task 05); browser rendering and scopes (Task 07); sparse solver and profiling (Task 09); Vactrol/avalanche/audio (Task 10).
 
 ## 10. Default parameters
 
@@ -97,6 +97,9 @@ Deferred: BJT/MOSFET, controlled sources, op-amps, digital models (Task 04); cir
 | `capacitor` | `capacitance_f = 1e-6` |
 | `inductor` | `inductance_h = 1e-3` |
 | `diode` | `is_a = 1e-12`, `emission = 1` |
+| `switch` | `closed = 1`, `resistance_ohm = 1e-3` |
+| `bjt` | `beta = 100`, `is_a = 1e-12`, `emission = 1`, `pnp = 0` |
+| `mosfet` | `pnp = 0`, `vt = 1.5`, `beta = 0.02` |
 | `wire`, `ground` | none |
 
 Parameter names are the SI-suffixed keys from `Docs/interface-schema.json`. Unknown keys are accepted by `set_parameter` but do not affect the model; unsupported kinds are rejected at add time.

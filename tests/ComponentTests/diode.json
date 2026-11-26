@@ -1,0 +1,81 @@
+{
+  "name": "diode",
+  "ops": [
+    {
+      "op": "add",
+      "element_id": "g",
+      "kind": "ground",
+      "node_ids": [
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "v1",
+      "kind": "voltage_source",
+      "node_ids": [
+        "n1",
+        "gnd"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "r1",
+      "kind": "resistor",
+      "node_ids": [
+        "n1",
+        "n2"
+      ]
+    },
+    {
+      "op": "add",
+      "element_id": "d1",
+      "kind": "diode",
+      "node_ids": [
+        "n2",
+        "gnd"
+      ]
+    }
+  ],
+  "params": [
+    {
+      "element_id": "v1",
+      "params": {
+        "voltage_v": 5.0
+      }
+    },
+    {
+      "element_id": "r1",
+      "params": {
+        "resistance_ohm": 1000.0
+      }
+    },
+    {
+      "element_id": "d1",
+      "params": {
+        "is_a": 1e-12
+      }
+    }
+  ],
+  "step": {
+    "dt_s": 5e-06,
+    "steps": 200
+  },
+  "expect": {
+    "diagnostics": "empty",
+    "nodes": {
+      "n2": {
+        "expected": 0.576,
+        "tolerance": 0.03
+      }
+    },
+    "measurements": [
+      {
+        "element_id": "d1",
+        "quantity": "current",
+        "expected": 0.00442,
+        "tolerance": 0.0005
+      }
+    ]
+  }
+}
