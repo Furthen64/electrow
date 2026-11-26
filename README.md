@@ -4,7 +4,7 @@ Electrow is a planned open-source circuit simulator with a web-based interface, 
 
 ## Project status
 
-Tasks 01–05 and the Python local backend (Task 06) are complete. The browser schematic editor (Task 07) and the remaining validation, performance and release tasks are still pending.
+Tasks 01–06 and the browser schematic editor (Task 07) are complete. The remaining validation, performance, fork-feature and release tasks are still pending.
 
 ## Run locally
 

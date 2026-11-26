@@ -371,11 +371,26 @@ impl Engine {
         Value::Object(ack_entries)
     }
 
+    fn export_document(&self) -> circuit_doc::CircuitDocument {
+        let mut document = self.loaded_document.clone().unwrap_or_default();
+        document.circuit_id = self.circuit_id.clone();
+        document.elements = self
+            .circuit
+            .elements
+            .iter()
+            .map(|element| circuit_doc::CircuitElement {
+                id: element.id.clone(),
+                kind: element.kind.clone(),
+                nodes: element.nodes.clone(),
+                params: element.params.clone(),
+                geometry: None,
+            })
+            .collect();
+        document
+    }
+
     fn export_circuit(&self, id: &str, _args: &Value) -> Value {
-        let Some(document) = &self.loaded_document else {
-            return fail(id, "no_document", "no circuit document has been loaded");
-        };
-        let value = circuit_doc::document_to_json(document);
+        let value = circuit_doc::document_to_json(&self.export_document());
         if value.has_non_finite() {
             return fail(
                 id,
@@ -934,11 +949,28 @@ w 112 368 240 368 0
     }
 
     #[test]
-    fn export_requires_loaded_document() {
+    fn export_reflects_current_circuit_state() {
         let mut engine = Engine::new();
-        engine.handle(&request("c1", "create", &[]));
-        let response = engine.handle(&request("c2", "export_circuit", &[]));
-        assert_eq!(response.get("ok"), Some(&Value::Bool(false)));
+        engine.handle(&request("c1", "create", &[("circuit_id", text("built"))]));
+        let add = Value::Array(vec![obj(&[
+            ("op", text("add")),
+            ("element_id", text("r1")),
+            ("kind", text("resistor")),
+            ("node_ids", Value::Array(vec![text("n0"), text("n1")])),
+        ])]);
+        engine.handle(&request(
+            "c2",
+            "topology_edit",
+            &[("base_revision", num(1.0)), ("ops", add)],
+        ));
+        let response = engine.handle(&request("c3", "export_circuit", &[]));
+        assert_eq!(response.get("ok"), Some(&Value::Bool(true)));
+        let result = response.get("result").unwrap();
+        assert_eq!(result.get("circuit_id"), Some(&text("built")));
+        assert_eq!(
+            result.get("elements").and_then(Value::as_array).unwrap().len(),
+            1
+        );
     }
 
     #[test]

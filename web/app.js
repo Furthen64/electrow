@@ -1,3 +1,23 @@
+import { Transport } from "./js/transport.js";
+import { CircuitDocument, snap } from "./js/circuit.js";
+import { SchematicView } from "./js/renderer.js";
+import { Scope } from "./js/scope.js";
+import { Editor } from "./js/editor.js";
+
+const transport = new Transport();
+const documentModel = new CircuitDocument();
+const scope = new Scope(document.getElementById("scope"));
+const view = new SchematicView(document.getElementById("schematic"));
+const editor = new Editor({
+  transport,
+  view,
+  document: documentModel,
+  scope,
+  onStatus: (text) => {
+    document.getElementById("editor-status").textContent = text;
+  },
+});
+
 const els = {
   status: document.getElementById("status"),
   engineInfo: document.getElementById("engine-info"),
@@ -14,26 +34,9 @@ const els = {
   exportOutput: document.getElementById("export-output"),
 };
 
-let nextId = 1;
-let lastRevision = 0;
-let lastSequence = -1;
-let pollTimer = null;
-
 function setBadge(element, text, kind) {
   element.textContent = text;
   element.className = `badge badge-${kind}`;
-}
-
-function startPolling() {
-  if (pollTimer !== null) return;
-  document.getElementById("btn-run").classList.add("running");
-  pollTimer = setInterval(() => send("snapshot", {}, true), 50);
-}
-
-function stopPolling() {
-  if (pollTimer !== null) clearInterval(pollTimer);
-  pollTimer = null;
-  document.getElementById("btn-run").classList.remove("running");
 }
 
 function renderRows(target, rows, emptyText) {
@@ -59,7 +62,7 @@ function renderRows(target, rows, emptyText) {
   }
 }
 
-function renderSnapshot(snapshot) {
+transport.onSnapshot((snapshot) => {
   els.circuit.textContent = snapshot.circuit_id;
   els.revision.textContent = String(snapshot.revision);
   els.sequence.textContent = String(snapshot.sequence);
@@ -81,7 +84,7 @@ function renderSnapshot(snapshot) {
   );
   renderRows(
     els.nodes,
-    (snapshot.nodes || []).map((n) => [n.id, `${Number(n.voltage_v).toPrecision(6)} V`]),
+    (snapshot.nodes || []).map((node) => [node.id, `${Number(node.voltage_v).toPrecision(6)} V`]),
     "No nodes yet."
   );
 
@@ -104,157 +107,100 @@ function renderSnapshot(snapshot) {
       els.diagnostics.append(li);
     }
   }
-}
+});
 
-function showError(error) {
-  els.response.textContent = `${error.code || "error"}: ${error.message || error}`;
-  setBadge(els.status, "error", "bad");
-}
+transport.onSessionLost = async () => {
+  setBadge(els.status, "session restarted", "bad");
+  await editor.newCircuit();
+};
 
-async function send(cmd, args = {}, silent = false) {
-  const request = { v: 1, id: `web-${nextId++}`, cmd, args };
-  try {
-    const result = await fetch("/api/command", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
-    const data = await result.json();
-    if (!result.ok || data.ok === false) {
-      showError(data.error || { code: "http", message: `HTTP ${result.status}` });
-      if (data.error && data.error.code === "session_lost") {
-        stopPolling();
-        lastRevision = 0;
-        lastSequence = -1;
-        send("create");
-      }
-      return null;
-    }
-    const response = data.result;
-    if (typeof response.revision === "number") lastRevision = response.revision;
-    if (!silent) els.response.textContent = JSON.stringify(response, null, 2);
-    setBadge(els.status, "connected", "good");
-    if (response && response.type === "snapshot") {
-      if (response.sequence <= lastSequence) {
-        setBadge(els.status, "stale frame dropped", "warn");
-        return response;
-      }
-      lastSequence = response.sequence;
-      renderSnapshot(response);
-    } else {
-      send("snapshot", {}, true);
-    }
-    return response;
-  } catch (error) {
-    els.response.textContent = String(error);
-    setBadge(els.status, "disconnected", "bad");
+transport.onStateChange = ({ polling }) => {
+  document.getElementById("btn-run").classList.toggle("running", polling);
+};
+
+async function showResult(promiseOrResult) {
+  const result = await promiseOrResult;
+  if (!result.ok) {
+    const error = result.error || { code: "error", message: "unknown" };
+    els.response.textContent = `${error.code}: ${error.message}`;
+    setBadge(els.status, "error", "bad");
     return null;
   }
-}
-
-async function fileCommand(path, name) {
-  if (!name) {
-    showError({ code: "bad_request", message: "Enter a circuit name first." });
-    return null;
-  }
-  try {
-    const result = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ v: 1, id: `web-${nextId++}`, name }),
-    });
-    const data = await result.json();
-    if (!result.ok || data.ok === false) {
-      showError(data.error || { code: "http", message: `HTTP ${result.status}` });
-      return null;
-    }
-    els.response.textContent = JSON.stringify(data.result, null, 2);
-    setBadge(els.status, "connected", "good");
-    return data.result;
-  } catch (error) {
-    els.response.textContent = String(error);
-    setBadge(els.status, "disconnected", "bad");
-    return null;
-  }
-}
-
-async function refreshFiles() {
-  try {
-    const data = await (await fetch("/api/circuits")).json();
-    const select = document.getElementById("file-list");
-    select.replaceChildren(new Option("choose…", ""));
-    for (const name of data.names || []) select.add(new Option(name, name));
-  } catch (error) {
-    els.response.textContent = String(error);
-  }
-}
-
-async function createDivider() {
-  await send("create", { circuit_id: "divider" });
-  await send("topology_edit", {
-    base_revision: lastRevision,
-    ops: [
-      { op: "add", element_id: "gnd", kind: "ground", node_ids: ["gnd"] },
-      { op: "add", element_id: "v1", kind: "voltage_source", node_ids: ["n1", "gnd"] },
-      { op: "add", element_id: "r1", kind: "resistor", node_ids: ["n1", "n2"] },
-      { op: "add", element_id: "r2", kind: "resistor", node_ids: ["n2", "gnd"] },
-    ],
-  });
-  for (const [element_id, params] of [
-    ["v1", { voltage_v: 10 }],
-    ["r1", { resistance_ohm: 1000 }],
-    ["r2", { resistance_ohm: 1000 }],
-  ]) {
-    await send("parameter_edit", { base_revision: lastRevision, element_id, params });
-  }
-  await send("subscribe", {
-    stream_id: "scope-1",
-    signals: [{ id: "vout", element_id: "r2", quantity: "voltage", unit: "V" }],
-  });
-  await send("step", { dt_s: 0.000005, steps: 1 });
-  document.getElementById("signal-id").value = "r2";
+  els.response.textContent = JSON.stringify(result.result, null, 2);
+  setBadge(els.status, "connected", "good");
+  return result.result;
 }
 
 function bind(id, handler) {
-  document.getElementById(id).addEventListener("click", handler);
+  document.getElementById(id)?.addEventListener("click", handler);
 }
 
-bind("btn-hello", () => send("hello"));
-bind("btn-new", () => {
-  stopPolling();
-  send("create");
+async function buildDividerDemo() {
+  await editor.newCircuit();
+  const ground = documentModel.add("ground", 220, 300, 220, 300);
+  const source = documentModel.add("voltage_source", 220, 100, 220, 300);
+  const upper = documentModel.add("resistor", 220, 100, 420, 100);
+  const lower = documentModel.add("resistor", 420, 100, 420, 300);
+  documentModel.add("wire", 420, 300, 220, 300);
+  documentModel.setParam(source, "voltage_v", 10);
+  documentModel.setParam(upper, "resistance_ohm", 1000);
+  documentModel.setParam(lower, "resistance_ohm", 1000);
+  await editor.sync();
+  await transport.send("step", { dt_s: 0.000005, steps: 1 });
+  editor.status("Divider ready — vout should read 5 V");
+  document.getElementById("signal-id").value = lower;
+}
+
+bind("btn-hello", async () => {
+  const health = await transport.health();
+  if (health.ok) {
+    els.engineInfo.textContent = health.data.engine_version ? `engine ${health.data.engine_version}` : "engine: unknown";
+    setBadge(els.status, "connected", "good");
+    els.response.textContent = JSON.stringify(health.data, null, 2);
+  } else {
+    setBadge(els.status, "disconnected", "bad");
+    els.response.textContent = String(health.error);
+  }
 });
-bind("btn-divider", () => {
-  stopPolling();
-  createDivider();
+bind("btn-new", () => editor.newCircuit());
+bind("btn-divider", buildDividerDemo);
+
+bind("btn-add-element", async () => {
+  const kind = document.getElementById("build-kind").value;
+  const nodeA = document.getElementById("build-node-a").value.trim();
+  const nodeB = document.getElementById("build-node-b").value.trim();
+  const id = documentModel.add(
+    kind,
+    snap(view.camera.x),
+    snap(view.camera.y),
+    snap(view.camera.x + 100),
+    snap(view.camera.y)
+  );
+  const element = documentModel.find(id);
+  element.nodes = kind === "ground" ? [nodeA] : [nodeA, nodeB];
+  await editor.sync();
+  editor.status(`Added ${kind} ${id}`);
+  document.getElementById("param-id").value = id;
 });
-bind("btn-add-element", () =>
-  send("topology_edit", {
-    base_revision: lastRevision,
-    ops: [
-      {
-        op: "add",
-        element_id: document.getElementById("build-id").value.trim(),
-        kind: document.getElementById("build-kind").value,
-        node_ids: [
-          document.getElementById("build-node-a").value.trim(),
-          document.getElementById("build-node-b").value.trim(),
-        ],
-      },
-    ],
-  })
-);
-bind("btn-set-param", () =>
-  send("parameter_edit", {
-    base_revision: lastRevision,
-    element_id: document.getElementById("param-id").value.trim(),
-    params: {
-      [document.getElementById("param-key").value]: Number(document.getElementById("param-value").value),
-    },
-  })
-);
-bind("btn-subscribe", () =>
-  send("subscribe", {
+
+bind("btn-set-param", async () => {
+  const id = document.getElementById("param-id").value.trim();
+  const key = document.getElementById("param-key").value;
+  const value = Number(document.getElementById("param-value").value);
+  if (documentModel.find(id)) {
+    documentModel.setParam(id, key, value);
+    await editor.sync();
+  } else {
+    await showResult(transport.send("parameter_edit", {
+      base_revision: transport.revision,
+      element_id: id,
+      params: { [key]: value },
+    }));
+  }
+});
+
+bind("btn-subscribe", async () =>
+  await showResult(transport.send("subscribe", {
     stream_id: "scope-1",
     signals: [
       {
@@ -264,69 +210,78 @@ bind("btn-subscribe", () =>
         unit: document.getElementById("signal-quantity").value === "current" ? "A" : "V",
       },
     ],
-  })
+  }))
 );
-bind("btn-unsubscribe", () => send("unsubscribe", { stream_id: "scope-1" }));
+bind("btn-unsubscribe", async () =>
+  await showResult(transport.send("unsubscribe", { stream_id: "scope-1" }))
+);
+
 bind("btn-run", async () => {
-  const response = await send("run");
-  if (response) startPolling();
+  const result = await transport.send("run");
+  if (result.ok) transport.setPolling(true);
+  else await showResult(result);
 });
 bind("btn-pause", async () => {
-  stopPolling();
-  await send("pause");
+  transport.setPolling(false);
+  await showResult(transport.send("pause"));
 });
-bind("btn-step", () =>
-  send("step", {
+bind("btn-step", async () =>
+  await showResult(transport.send("step", {
     dt_s: Number(document.getElementById("step-dt").value),
     steps: Number(document.getElementById("step-count").value),
-  })
+  }))
 );
 bind("btn-reset", async () => {
-  stopPolling();
-  await send("reset");
+  transport.setPolling(false);
+  await showResult(transport.send("reset"));
 });
-bind("btn-snapshot", () => send("snapshot"));
-bind("btn-load-dump", () => {
+bind("btn-snapshot", async () => await showResult(transport.send("snapshot")));
+
+bind("btn-load-dump", async () => {
   const dump = document.getElementById("dump-input").value;
   const selected = document.getElementById("dump-format").value;
-  const format =
-    selected !== "auto" ? selected : dump.trimStart().startsWith("<") ? "xml" : "text";
-  stopPolling();
-  send("load_circuit", { dump, format, base_revision: lastRevision });
+  const format = selected !== "auto" ? selected : dump.trimStart().startsWith("<") ? "xml" : "text";
+  transport.setPolling(false);
+  const result = await showResult(transport.send("load_circuit", { dump, format, base_revision: transport.revision }));
+  if (result) await editor.pullFromBackend();
 });
 bind("btn-export", async () => {
-  const result = await send("export_circuit", {});
+  const result = await showResult(transport.send("export_circuit", {}));
   if (!result) return;
   els.exportOutput.hidden = false;
   els.exportOutput.textContent = JSON.stringify(result, null, 2);
 });
 
-bind("btn-save-file", () =>
-  fileCommand("/api/circuit/save", document.getElementById("file-name").value.trim())
-);
-bind("btn-load-file", async () => {
-  stopPolling();
-  const result = await fileCommand("/api/circuit/load", document.getElementById("file-name").value.trim());
-  if (!result) return;
-  if (typeof result.revision === "number") lastRevision = result.revision;
-  lastSequence = -1;
-  send("snapshot");
+bind("btn-save-file", async () => {
+  const name = document.getElementById("file-name").value.trim();
+  if (!name) return showResult({ ok: false, error: { code: "bad_request", message: "Enter a name first" } });
+  await showResult(transport.fileCommand("/api/circuit/save", name));
 });
-bind("btn-refresh-files", refreshFiles);
+bind("btn-load-file", async () => {
+  const name = document.getElementById("file-name").value.trim();
+  if (!name) return showResult({ ok: false, error: { code: "bad_request", message: "Enter a name first" } });
+  transport.setPolling(false);
+  const result = await showResult(transport.fileCommand("/api/circuit/load", name));
+  if (result) await editor.pullFromBackend();
+});
+bind("btn-refresh-files", async () => {
+  const select = document.getElementById("file-list");
+  select.replaceChildren(new Option("choose…", ""));
+  for (const name of await transport.listFiles()) select.add(new Option(name, name));
+});
 document.getElementById("file-list").addEventListener("change", (event) => {
   if (event.target.value) document.getElementById("file-name").value = event.target.value;
 });
 
 async function health() {
-  try {
-    const result = await fetch("/api/health");
-    const data = await result.json();
-    setBadge(els.status, result.ok ? "connected" : "error", result.ok ? "good" : "bad");
-    els.engineInfo.textContent = data.engine_version ? `engine ${data.engine_version}` : "engine: unknown";
-  } catch (error) {
+  const result = await transport.health();
+  if (result.ok) {
+    setBadge(els.status, "connected", "good");
+    els.engineInfo.textContent = result.data.engine_version ? `engine ${result.data.engine_version}` : "engine: unknown";
+  } else {
     setBadge(els.status, "disconnected", "bad");
   }
 }
 
-refreshFiles();
 health();
+document.getElementById("btn-refresh-files").click();

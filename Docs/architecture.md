@@ -118,6 +118,10 @@ Full schema, including per-command argument validation and examples, is in [inte
 
 Error codes: `unsupported_version`, `bad_request`, `unknown_command`, `stale_revision`, `unknown_element`, `unknown_stream`, `bad_document`, `invalid_document`, `no_document`, `session_lost`, `host_not_allowed`, `not_found`, `invalid_request_size`, `bad_file`, `file_error`, `engine_unavailable`, `internal_error`.
 
+### Browser UI (Task 07)
+
+The browser is plain HTML/CSS/ES modules under `web/`. `web/js/transport.js` owns the versioned command stream, revision/sequence tracking, snapshot listeners and polling; `circuit.js` owns the editor document and its undo/redo snapshots plus diff-to-ops backend sync; `symbols.js` is the symbol registry; `renderer.js` is the Canvas 2D viewport (grid, camera transform, pointer capture, hit testing, current-flow animation); `scope.js` is a bounded 4096-sample oscilloscope; `editor.js` glues palette/tools/keyboard to the document and view. `web/app.js` owns the dashboard panels. Canvas 2D was chosen after a small spike: it handles grid, zoom/pan and animated current dots with one rendering path and no dependencies. `requestAnimationFrame` is display-only; simulated time still comes exclusively from engine snapshots. Geometry is edited locally; export currently carries electrical state (ids, kinds, nodes, parameters), and the editor auto-layouts imported circuits whose documents have no geometry.
+
 ### HTTP endpoints (Task 06)
 
 | Endpoint | Purpose |
