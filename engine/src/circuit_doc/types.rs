@@ -105,3 +105,14 @@ impl DocDiagnostic {
         Value::Object(entries)
     }
 }
+
+/// A reference-format record that could not be imported.
+///
+/// Unsupported records are collected during import (never silently
+/// dropped) and surfaced to the caller with record context.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnsupportedRecord {
+    pub line: usize,
+    pub type_token: String,
+    pub reason: String,
+}

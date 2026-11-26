@@ -13,8 +13,9 @@ mod validate;
 pub use parse::parse_document;
 pub use serialize::document_to_json;
 pub use types::{
-    CircuitDocument, CircuitElement, CircuitOptions, DocDiagnostic, Geometry, CIRCUIT_DOC_FORMAT,
-    CIRCUIT_DOC_VERSION, MAX_DOCUMENT_BYTES, MAX_ELEMENTS, MAX_ID_LEN, MAX_TITLE_LEN,
+    CircuitDocument, CircuitElement, CircuitOptions, DocDiagnostic, Geometry, UnsupportedRecord,
+    CIRCUIT_DOC_FORMAT, CIRCUIT_DOC_VERSION, MAX_DOCUMENT_BYTES, MAX_ELEMENTS, MAX_ID_LEN,
+    MAX_TITLE_LEN,
 };
 
 use std::collections::HashMap;

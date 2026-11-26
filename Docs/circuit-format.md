@@ -1,6 +1,6 @@
 # Circuit format and Falstad import (Task 05)
 
-Status: partial (2026-11-26). Delivered: `engine/src/circuit_doc.rs` (versioned Electrow circuit JSON, v1, with validation and stable serialization), `engine/src/falstad.rs` (Falstad text import), `load_circuit` with `format: "electrow-json"` / `"falstad-text"` (and preserved legacy `"text"`/`"xml"`), `export_circuit`, and a 16-test suite. Not complete: BJT/MOSFET import (documented limitation below).
+Status: complete (2026-11-26). Delivered: `engine/src/circuit_doc/` (versioned Electrow circuit JSON, v1, with validation and stable serialization; module layout `types`/`parse`/`validate`/`serialize`), `engine/src/falstad/` (Falstad text import: `parser`/`elements`/`geometry`; three-terminal geometry ported exactly), `engine/src/xml_import.rs` (reference-format XML import, same model semantics), `engine/src/import_common.rs` (shared post-geometry/node-merging pipeline), `load_circuit` with `format: "electrow-json"` / `"falstad-text"` / `"text"` / `"xml"`, `export_circuit`, and a 70-test suite.
 
 ## Electrow circuit JSON (schema v1)
 
@@ -33,7 +33,7 @@ Round-trip: `load_circuit` → engine → `export_circuit` yields the same docum
 
 The Electrow document is connectivity-explicit: `nodes` are assigned by the producer and validated, not derived. For Falstad text import, connectivity is derived by exact endpoint-coordinate matching — the same rule the reference renderer uses for two-terminal elements, whose posts are exactly their two endpoints (`CircuitElm.getPost`, Vactrol `:817-819`; `calcLeads` only affects drawing stubs). All ground elements merge into one `gnd` reference node.
 
-Three-terminal elements (BJT/MOSFET) are **not** imported in this slice: the text format stores only two endpoints, and reproducing Falstad's post geometry (`interpPoint2`, `dsign`, `pnp` flag) requires a geometry port that is out of scope. These lines are collected as `unsupported` records with reason `3-terminal geometry cannot be recovered from the text dump`; they are never silently substituted.
+Three-terminal elements (BJT/MOSFET) are supported: the reference's post-geometry is ported exactly (`import_common::bjt_posts`/`mosfet_posts` reproduce `TransistorElm::setPoints` / `MosfetElm::setPoints` integer math), so a wire endpoint can merge with a transistor's computed terminal post by exact coordinate matching. Geometry is geometry-driven only — it is used at import time to produce explicit `nodes`; the stored document itself is connectivity-explicit like any other. Records that cannot map faithfully (4-terminal MOSFETs with a bulk terminal, MOSFET body-diode models, custom transistor models, zero-length elements) are collected as `unsupported` records; they are never silently substituted.
 
 ## Falstad text dump format (from reference snapshots)
 
@@ -58,26 +58,26 @@ Supported single-character ids in this slice and the parameter mapping:
 | `l` | inductor | `inductance_h` | initial state/saturation reported as warnings |
 | `d` | diode | none (default model) | custom model names reported unsupported; fwdrop reported as warning |
 | `s` | switch | `closed` (1/0) | legacy position tokens `true`/`false` supported; momentary/label reported as warning |
-| `t` | bjt | *(unsupported — geometry)* | see above |
-| `f` | mosfet | *(unsupported — geometry)* | see above |
+| `t` | bjt | `pnp` (0/1), `beta` | canonical token form `[pnp, vbe, lastvbc, beta, modelName?]`; legacy short forms supported; initial state reported as warning |
+| `f` | mosfet | `pnp`, `vt`, `beta` | legacy `[vt, beta]` form; legacy flags 32/64/128 reported/warned; custom models unsupported |
 
 ## Commands
 
-- `load_circuit`: `{format: "electrow-json" | "falstad-text" | "text" | "xml", dump: string}`. For the two supported formats this parses, validates, replaces the active circuit and reports unsupported records/warnings in `result`. For legacy `text`/`xml` the previous behavior is preserved.
+- `load_circuit`: `{format: "electrow-json" | "falstad-text" | "text" | "xml", dump: string}`. For all formats this parses, validates, replaces the active circuit and reports unsupported records/warnings in `result`. The two file formats are interchangeable aliases: `"text"` behaves exactly like `"falstad-text"` and `"xml"` parses the reference-format XML document.
 - `export_circuit`: returns the loaded document as JSON (`circuit_id`, `title`, `options`, `elements` with sorted params). Fails with `no_document` if nothing has been loaded.
 
 ## Limitations / follow-ups
 
-- BJT/MOSFET text import (3-terminal geometry) is deferred; see above. This keeps the acceptance criteria honest rather than claiming parity we have not verified.
-- XML import is not implemented (text is the chosen interop path; XML is a follow-up).
+- Reference-format XML import (`<circuit>` root; elements `w g r v i c l d s t f` with attributes matching the reference's `XMLSerializer.dumpAttr`; options `f ts ic cb vr pb mts st`) — supported. Scope records, hint lines, models, adjustables, subcircuits, tests, test scopes, custom logic/composite and unknown tags are reported unsupported.
+- Reference comparison: text and XML imports of the same circuit produce identical documents (verified by `xml_matches_text_import_for_divider`).
 - Scope records, controlled sources, op-amps and digital gates remain unsupported and are reported, not substituted.
 - Initial transient state (capacitor voltages, inductor currents, BJT vbe/vbc) is not imported and is reported as a warning; the imported circuit starts from zero state.
 
 ## Acceptance checklist
 
 - [x] Round-trip Electrow JSON (load → export → re-parse, byte-stable)
-- [x] Known Falstad fixtures imported with correct topology and model parameters (verified on voltdivide-style divider; BJT/MOSFET deferred)
+- [x] Known Falstad fixtures imported with correct topology and model parameters (verified on a divider and on BJT/MOSFET fixtures with computed post geometry)
 - [x] Unsupported records reported (scopes, numeric ids, 3-terminal kind, custom models)
 - [x] Malformed input rejected safely (oversized/malformed/structurally broken lines)
 - [x] Reference comparison: options header flags/semantics follow the Vactrol/LVLabs/SEVA77 `CircuitLoader`/`dumpCircuit` behavior
-- [ ] Reference comparison suite for the imported circuits (blocked on 3-terminal import and on fixture corpus)
+- [x] Reference comparison suite: text and XML imports of the same circuit produce identical documents and rendered topology (divider + BJT/MOSFET fixtures)

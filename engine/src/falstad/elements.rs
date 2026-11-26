@@ -144,41 +144,46 @@ pub(crate) fn parse_element(
             }
         }
         "bjt" => {
+            // Canonical dump: [pnp, lastvbe, lastvbc, beta, modelName?]
+            // Legacy/short dumps: [pnp, beta] or [pnp].
             let pnp_token = raw.tokens.first().cloned().unwrap_or_else(|| "1".to_string());
             let pnp: i64 = pnp_token.parse().map_err(|_| {
                 make_unsupported(raw, format!("bad pnp token {pnp_token:?}"))
             })?;
+            if pnp != -1 && pnp != 1 {
+                return Err(make_unsupported(raw, format!("bad pnp token {pnp_token:?}")));
+            }
             params.insert("pnp".to_string(), if pnp == -1 { 1.0 } else { 0.0 });
-            // Canonical dump: [pnp, vbe, vbc, beta, modelName?]
-            // Legacy/short dump: [pnp, beta] or [pnp].
             let rest = &raw.tokens[1..];
-            let numeric_count = rest
-                .iter()
-                .filter(|token| token.parse::<f64>().is_ok())
-                .count();
-            if rest.len() >= 3 && numeric_count >= 3 {
+            // Numeric tokens before the (optional) trailing model name.
+            let mut numeric: Vec<f64> = Vec::new();
+            let mut model_name: Option<String> = None;
+            for token in rest {
+                if let Ok(value) = token.parse::<f64>() {
+                    numeric.push(value);
+                } else {
+                    model_name = Some(token.replace("%20", " "));
+                }
+            }
+            let beta = if numeric.len() >= 3 {
                 // [vbe, vbc, beta, ...]
-                if let Ok(beta) = rest[2].parse::<f64>() {
-                    params.insert("beta".to_string(), beta);
-                }
-            } else if let Some(token) = rest.first() {
-                if let Ok(beta) = token.parse::<f64>() {
-                    params.insert("beta".to_string(), beta);
-                }
-            }
-            // Model name is a trailing non-numeric token.
-            if let Some(tail) = rest.last() {
-                if tail.parse::<f64>().is_err() {
-                    let tail = tail.replace("%20", " ");
-                    if tail != "default" {
-                        return Err(make_unsupported(
-                            raw,
-                            format!("custom BJT model {tail:?} is not supported"),
-                        ));
-                    }
+                numeric[2]
+            } else if let Some(&beta) = numeric.first() {
+                // [beta] (legacy/short dump)
+                beta
+            } else {
+                return Err(make_unsupported(raw, "missing beta token"));
+            };
+            params.insert("beta".to_string(), beta);
+            if let Some(name) = model_name {
+                if name != "default" {
+                    return Err(make_unsupported(
+                        raw,
+                        format!("custom BJT model {name:?} is not supported"),
+                    ));
                 }
             }
-            if rest.len() >= 2 {
+            if numeric.len() >= 2 {
                 warnings.push(format!(
                     "line {}: BJT initial state (last vbe/vbc) is not imported",
                     raw.line
@@ -186,12 +191,44 @@ pub(crate) fn parse_element(
             }
         }
         "mosfet" => {
+            // Old-style text dumps: [vt, beta]; flags carry the legacy bits.
             let vt = parse_f64_token(raw, &raw.tokens, 0, "vt")?;
             let beta = parse_f64_token(raw, &raw.tokens, 1, "beta")?;
-            params.insert("vt".to_string(), vt);
-            params.insert("beta".to_string(), beta);
             let pnp_flag = (raw.flags & 1) != 0;
             params.insert("pnp".to_string(), if pnp_flag { 1.0 } else { 0.0 });
+            params.insert("vt".to_string(), vt);
+            params.insert("beta".to_string(), beta);
+            // Legacy flags packed into the element's flags field (old files).
+            const FLAG_DIGITAL_LEGACY: u32 = 4;
+            const FLAG_HIDE_BULK_LEGACY: u32 = 16;
+            const FLAG_BODY_DIODE_LEGACY: u32 = 32;
+            const FLAG_BODY_TERMINAL_LEGACY: u32 = 64;
+            const FLAG_SHOW_BODY_DIODE_LEGACY: u32 = 128;
+            let flags = raw.flags;
+            if flags & FLAG_BODY_DIODE_LEGACY != 0 {
+                return Err(make_unsupported(
+                    raw,
+                    "MOSFET body-diode model is not supported",
+                ));
+            }
+            if flags & FLAG_BODY_TERMINAL_LEGACY != 0 {
+                warnings.push(format!(
+                    "line {}: MOSFET body-terminal setting is not imported",
+                    raw.line
+                ));
+            }
+            if flags & (FLAG_DIGITAL_LEGACY | FLAG_HIDE_BULK_LEGACY) != 0 {
+                warnings.push(format!(
+                    "line {}: MOSFET bulk/digital display option is not imported",
+                    raw.line
+                ));
+            }
+            if flags & FLAG_SHOW_BODY_DIODE_LEGACY != 0 {
+                warnings.push(format!(
+                    "line {}: MOSFET body-diode symbol display is not imported",
+                    raw.line
+                ));
+            }
         }
         "switch" => {
             let position_token = raw.tokens.first().cloned().unwrap_or_else(|| "0".to_string());

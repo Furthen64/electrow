@@ -1,5 +1,7 @@
 pub mod circuit_doc;
 pub mod falstad;
+pub mod xml_import;
+pub mod import_common;
 pub mod json;
 pub mod models;
 pub mod solver;
@@ -230,17 +232,7 @@ impl Engine {
             None => return fail(id, "bad_request", "dump must be a string"),
         };
         let format = args.get("format").and_then(Value::as_str).unwrap_or("");
-        if format == "text" || format == "xml" {
-            self.loaded_dump = Some(dump);
-            self.loaded_document = None;
-            self.circuit.reset();
-            self.running = false;
-            self.status = "ready".to_string();
-            self.revision += 1;
-            self.bump_sequence();
-            return ok(id, self.ack(id));
-        }
-        if format != "electrow-json" && format != "falstad-text" {
+        if format != "electrow-json" && format != "falstad-text" && format != "text" && format != "xml" {
             return fail(id, "bad_request", "format must be 'electrow-json', 'falstad-text', 'text' or 'xml'");
         }
 
@@ -249,6 +241,12 @@ impl Engine {
                 Ok(document) => (document, Vec::new(), Vec::new()),
                 Err(diagnostics) => {
                     return self.document_error_response(id, diagnostics);
+                }
+            },
+            "xml" => match xml_import::parse_xml_import(&dump) {
+                Ok(import) => (import.document, import.unsupported, import.warnings),
+                Err(diagnostic) => {
+                    return fail(id, diagnostic.code, diagnostic.message);
                 }
             },
             _ => match falstad::parse_falstad_text(&dump) {

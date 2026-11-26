@@ -17,20 +17,13 @@
 //! port that is out of scope here.
 
 mod elements;
-mod geometry;
 mod parser;
 
+use crate::import_common::{assign_nodes, PendingRecord};
 use parser::{split_tokens, RawElement, MAX_ELEMENTS, MAX_LINE_LEN, MAX_TEXT_BYTES};
-use crate::circuit_doc::{
-    CircuitDocument, CircuitOptions, DocDiagnostic,
-};
+pub use crate::circuit_doc::UnsupportedRecord;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct UnsupportedRecord {
-    pub line: usize,
-    pub type_token: String,
-    pub reason: String,
-}
+use crate::circuit_doc::{CircuitDocument, CircuitOptions, DocDiagnostic};
 
 #[derive(Clone, Debug)]
 pub struct FalstadImport {
@@ -107,23 +100,26 @@ pub fn parse_falstad_text(text: &str) -> Result<FalstadImport, DocDiagnostic> {
         ));
     }
 
-    let mut elements = Vec::new();
+    let mut pending = Vec::new();
     for raw in &raw_elements {
-        let kind = elements::map_kind(raw).unwrap_or("unknown");
-        if kind == "bjt" || kind == "mosfet" {
-            unsupported.push(elements::make_unsupported(
-                raw,
-                "3-terminal geometry cannot be recovered from the text dump",
-            ));
-            continue;
-        }
         match elements::parse_element(raw, &mut warnings) {
-            Ok(element) => elements.push(element),
+            Ok(element) => pending.push(PendingRecord {
+                line: raw.line,
+                type_token: raw.type_token.clone(),
+                element,
+            }),
             Err(record) => unsupported.push(record),
         }
     }
 
-    let elements = geometry::assign_nodes(elements);
+    let (elements, failures) = assign_nodes(pending);
+    for failure in failures {
+        unsupported.push(UnsupportedRecord {
+            line: failure.line,
+            type_token: failure.type_token,
+            reason: failure.reason,
+        });
+    }
 
     let document = CircuitDocument {
         circuit_id: String::new(), // filled in by caller
@@ -208,16 +204,76 @@ s 100 100 100 200 0 true true
     }
 
     #[test]
-    fn bjt_and_mosfet_are_reported_unsupported() {
+    fn bjt_imports_beta_pnp_and_computes_posts() {
         let text = "\
 $ 0 5.0E-6 10 0 5.0
 t 100 100 100 200 0 1 0.5 0.5 100 default
-f 100 100 100 200 1 1.5 0.02
+w 100 100 100 60 0
+";
+        let import = parse_falstad_text(text).unwrap();
+        assert_eq!(import.document.elements.len(), 2);
+        let bjt = import.document.elements.iter().find(|e| e.kind == "bjt").unwrap();
+        assert_eq!(bjt.params.get("beta"), Some(&100.0));
+        assert_eq!(bjt.params.get("pnp"), Some(&0.0));
+        assert_eq!(bjt.nodes.len(), 3);
+        // Wire's first endpoint equals the BJT base post; it must merge.
+        let wire = import.document.elements.iter().find(|e| e.kind == "wire").unwrap();
+        assert_eq!(wire.nodes[0], bjt.nodes[0]);
+    }
+
+    #[test]
+    fn bjt_wire_post_merges_with_collector_post() {
+        // Wire whose endpoint exactly equals the collector post of the BJT.
+        let text = "\
+$ 0 5.0E-6 10 0 5.0
+t 100 100 100 200 0 1 0.5 0.5 100 default
+w 116 200 200 200 0
+";
+        let import = parse_falstad_text(text).unwrap();
+        let bjt = import.document.elements.iter().find(|e| e.kind == "bjt").unwrap();
+        let wire = import.document.elements.iter().find(|e| e.kind == "wire").unwrap();
+        assert_eq!(wire.nodes[0], bjt.nodes[1]);
+    }
+
+    #[test]
+    fn mosfet_imports_vt_beta_and_computes_posts() {
+        let text = "\
+$ 0 5.0E-6 10 0 5.0
+f 100 100 100 200 0 1.5 0.02
+";
+        let import = parse_falstad_text(text).unwrap();
+        assert_eq!(import.unsupported.len(), 0);
+        let mosfet = &import.document.elements[0];
+        assert_eq!(mosfet.kind, "mosfet");
+        assert_eq!(mosfet.params.get("vt"), Some(&1.5));
+        assert_eq!(mosfet.params.get("beta"), Some(&0.02));
+        assert_eq!(mosfet.params.get("pnp"), Some(&0.0));
+        assert_eq!(mosfet.nodes.len(), 3);
+    }
+
+    #[test]
+    fn mosfet_body_diode_and_terminal_are_reported() {
+        let text = "\
+$ 0 5.0E-6 10 0 5.0
+f 100 100 100 200 32 1.5 0.02
 ";
         let import = parse_falstad_text(text).unwrap();
         assert_eq!(import.document.elements.len(), 0);
-        assert_eq!(import.unsupported.len(), 2);
-        assert!(import.unsupported.iter().all(|u| u.reason.contains("3-terminal")));
+        assert_eq!(import.unsupported.len(), 1);
+        assert!(import.unsupported[0].reason.contains("body-diode"));
+    }
+
+    #[test]
+    fn mosfet_pnp_uses_flags_and_flip_flag_affects_geometry() {
+        let text = "\
+$ 0 5.0E-6 10 0 5.0
+f 100 100 100 200 9 1.5 0.02
+";
+        // Flag bit 1 = PNP, bit 8 = flip (total 9).
+        let import = parse_falstad_text(text).unwrap();
+        assert_eq!(import.unsupported.len(), 0);
+        let mosfet = &import.document.elements[0];
+        assert_eq!(mosfet.params.get("pnp"), Some(&1.0));
     }
 
     #[test]
