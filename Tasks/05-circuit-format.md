@@ -1,6 +1,6 @@
 # Task 05 — Circuit document and compatibility
 
-Status: pending. Depends on 02 and 04 for full model mapping.
+Status: partial (2026-11-26). Depends on 02 and 04. Done: versioned Electrow circuit JSON v1 (`engine/src/circuit_doc.rs`) with validation/serialization; Falstad text import for two-terminal components (`engine/src/falstad.rs`); `load_circuit` extended with `electrow-json`/`falstad-text` formats; `export_circuit`; 52 Rust tests + smoke test all pass; details in Docs/circuit-format.md. Remaining: BJT/MOSFET text import (3-terminal geometry), XML import, reference comparison suite.
 
 Define versioned Electrow circuit JSON containing stable component IDs, model identifiers, validated SI parameters, terminal connectivity, schematic geometry, wire endpoints, labels and scope configuration. Persist document state separately from transient solver state. Keep Rust authoritative for electrical connectivity; define how geometric connections and explicit junctions are converted to nodes.
 

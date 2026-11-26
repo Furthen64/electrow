@@ -1,3 +1,5 @@
+pub mod circuit_doc;
+pub mod falstad;
 pub mod json;
 pub mod models;
 pub mod solver;
@@ -34,6 +36,7 @@ pub struct Engine {
     circuit: Circuit,
     subscriptions: Vec<Subscription>,
     loaded_dump: Option<String>,
+    loaded_document: Option<circuit_doc::CircuitDocument>,
 }
 
 fn obj(entries: &[(&str, Value)]) -> Value {
@@ -89,6 +92,7 @@ impl Engine {
             circuit: Circuit::new(),
             subscriptions: Vec::new(),
             loaded_dump: None,
+            loaded_document: None,
         }
     }
 
@@ -157,6 +161,7 @@ impl Engine {
             ),
             "create" => self.create(&id, args),
             "load_circuit" => self.load_circuit(&id, args),
+            "export_circuit" => self.export_circuit(&id, args),
             "topology_edit" => self.topology_edit(&id, args),
             "parameter_edit" => self.parameter_edit(&id, args),
             "reset" => self.reset(&id, args),
@@ -225,16 +230,139 @@ impl Engine {
             None => return fail(id, "bad_request", "dump must be a string"),
         };
         let format = args.get("format").and_then(Value::as_str).unwrap_or("");
-        if format != "text" && format != "xml" {
-            return fail(id, "bad_request", "format must be 'text' or 'xml'");
+        if format == "text" || format == "xml" {
+            self.loaded_dump = Some(dump);
+            self.loaded_document = None;
+            self.circuit.reset();
+            self.running = false;
+            self.status = "ready".to_string();
+            self.revision += 1;
+            self.bump_sequence();
+            return ok(id, self.ack(id));
         }
+        if format != "electrow-json" && format != "falstad-text" {
+            return fail(id, "bad_request", "format must be 'electrow-json', 'falstad-text', 'text' or 'xml'");
+        }
+
+        let (mut document, unsupported, warnings) = match format {
+            "electrow-json" => match self.parse_document(&dump) {
+                Ok(document) => (document, Vec::new(), Vec::new()),
+                Err(diagnostics) => {
+                    return self.document_error_response(id, diagnostics);
+                }
+            },
+            _ => match falstad::parse_falstad_text(&dump) {
+                Ok(import) => (import.document, import.unsupported, import.warnings),
+                Err(diagnostic) => {
+                    return fail(id, diagnostic.code, diagnostic.message);
+                }
+            },
+        };
+
+        if document.circuit_id.is_empty() {
+            document.circuit_id = self.circuit_id.clone();
+        }
+        if document.circuit_id.is_empty() {
+            document.circuit_id = "circ-1".to_string();
+        }
+
+        self.circuit = Circuit::new();
+        let (operations, param_edits) = circuit_doc::document_operations(&document);
+        if let Err(diagnostic) = self.circuit.apply_operations(operations) {
+            return fail(id, "bad_document", format!("{diagnostic:?}"));
+        }
+        for (element_id, params) in &param_edits {
+            for (key, value) in params {
+                if let Err(diagnostic) = self.circuit.set_parameter(element_id, key, *value) {
+                    return fail(id, "bad_document", format!("{diagnostic:?}"));
+                }
+            }
+        }
+
         self.loaded_dump = Some(dump);
-        self.circuit.reset();
+        self.loaded_document = Some(document.clone());
+        self.circuit_id = document.circuit_id.clone();
         self.running = false;
         self.status = "ready".to_string();
         self.revision += 1;
         self.bump_sequence();
-        ok(id, self.ack(id))
+        ok(id, self.ack_with_document(id, unsupported, warnings))
+    }
+
+    fn parse_document(
+        &self,
+        dump: &str,
+    ) -> Result<circuit_doc::CircuitDocument, Vec<circuit_doc::DocDiagnostic>> {
+        circuit_doc::parse_document(dump)
+    }
+
+    fn document_error_response(
+        &self,
+        id: &str,
+        diagnostics: Vec<circuit_doc::DocDiagnostic>,
+    ) -> Value {
+        let messages: Vec<String> = diagnostics
+            .iter()
+            .take(10)
+            .map(|d| d.message.clone())
+            .collect();
+        let message = messages.join("; ");
+        obj(&[
+            ("v", num(PROTOCOL_VERSION as f64)),
+            ("id", text(id)),
+            ("ok", Value::Bool(false)),
+            (
+                "error",
+                obj(&[
+                    ("code", text("invalid_document")),
+                    ("message", text(message)),
+                    ("retryable", Value::Bool(false)),
+                    (
+                        "diagnostics",
+                        Value::Array(diagnostics.iter().map(|d| d.to_json()).collect()),
+                    ),
+                ]),
+            ),
+        ])
+    }
+
+    fn ack_with_document(
+        &self,
+        id: &str,
+        unsupported: Vec<falstad::UnsupportedRecord>,
+        warnings: Vec<String>,
+    ) -> Value {
+        let mut ack_entries = match self.ack(id) {
+            Value::Object(entries) => entries,
+            other => return other,
+        };
+        if !unsupported.is_empty() {
+            let records: Vec<Value> = unsupported
+                .iter()
+                .map(|record| {
+                    obj(&[
+                        ("line", num(record.line as f64)),
+                        ("type_token", text(record.type_token.clone())),
+                        ("reason", text(record.reason.clone())),
+                    ])
+                })
+                .collect();
+            ack_entries.push(("unsupported".to_string(), Value::Array(records)));
+        }
+        if !warnings.is_empty() {
+            ack_entries.push((
+                "warnings".to_string(),
+                Value::Array(warnings.iter().map(|w| text(w.clone())).collect()),
+            ));
+        }
+        Value::Object(ack_entries)
+    }
+
+    fn export_circuit(&self, id: &str, _args: &Value) -> Value {
+        let Some(document) = &self.loaded_document else {
+            return fail(id, "no_document", "no circuit document has been loaded");
+        };
+        ok(id, circuit_doc::document_to_json(document))
     }
 
     fn topology_edit(&mut self, id: &str, args: &Value) -> Value {
@@ -611,5 +739,139 @@ mod tests {
             response.get("result").and_then(|r| r.get("type")),
             Some(&text("ack"))
         );
+    }
+}
+
+#[cfg(test)]
+mod document_tests {
+    use super::*;
+
+    fn request(id: &str, cmd: &str, args: &[(&str, Value)]) -> Value {
+        obj(&[
+            ("v", num(1.0)),
+            ("id", text(id)),
+            ("cmd", text(cmd)),
+            ("args", obj(args)),
+        ])
+    }
+
+    const DIVIDER: &str = "\
+$ 1 5.0E-6 10 63 10.0 62
+v 112 368 112 48 0 0 40.0 10.0 0.0
+w 112 48 240 48 0
+r 240 48 240 208 0 10000
+r 240 208 240 368 0 10000
+w 112 368 240 368 0
+";
+
+    const DOCUMENT: &str = r#"{
+        "format": "electrow-circuit",
+        "version": 1,
+        "circuit_id": "doc-1",
+        "title": "test divider",
+        "options": {"max_time_step_s": 5e-6, "min_time_step_s": 5e-11, "voltage_range": 10.0},
+        "elements": [
+            {"id": "gnd1", "kind": "ground", "nodes": ["gnd"]},
+            {"id": "v1", "kind": "voltage_source", "nodes": ["n1", "gnd"], "params": {"voltage_v": 10.0}},
+            {"id": "r1", "kind": "resistor", "nodes": ["n1", "n2"], "params": {"resistance_ohm": 10000.0}},
+            {"id": "r2", "kind": "resistor", "nodes": ["n2", "gnd"], "params": {"resistance_ohm": 10000.0}}
+        ]
+    }"#;
+
+    #[test]
+    fn electrow_json_round_trip_and_loads() {
+        let mut engine = Engine::new();
+        engine.handle(&request("c1", "create", &[("circuit_id", text("doc-1"))]));
+        let response = engine.handle(&request(
+            "c2",
+            "load_circuit",
+            &[("format", text("electrow-json")), ("dump", text(DOCUMENT))],
+        ));
+        assert_eq!(response.get("ok"), Some(&Value::Bool(true)));
+        assert_eq!(engine.circuit.elements.len(), 4);
+        let export = engine.handle(&request("c3", "export_circuit", &[]));
+        assert_eq!(export.get("ok"), Some(&Value::Bool(true)));
+        let result = export.get("result").unwrap();
+        assert_eq!(result.get("format"), Some(&text("electrow-circuit")));
+        assert_eq!(result.get("version"), Some(&num(1.0)));
+        assert_eq!(result.get("circuit_id"), Some(&text("doc-1")));
+        let elements = result.get("elements").and_then(Value::as_array).unwrap();
+        assert_eq!(elements.len(), 4);
+        assert_eq!(result.get("title"), Some(&text("test divider")));
+    }
+
+    #[test]
+    fn electrow_json_load_applies_params() {
+        let mut engine = Engine::new();
+        engine.handle(&request("c1", "create", &[("circuit_id", text("doc-1"))]));
+        engine.handle(&request(
+            "c2",
+            "load_circuit",
+            &[("format", text("electrow-json")), ("dump", text(DOCUMENT))],
+        ));
+        let r1 = engine.circuit.elements.iter().find(|e| e.id == "r1").unwrap();
+        assert_eq!(r1.params.get("resistance_ohm"), Some(&10000.0));
+    }
+
+    #[test]
+    fn falstad_text_load_builds_topology() {
+        let mut engine = Engine::new();
+        engine.handle(&request("c1", "create", &[("circuit_id", text("half"))]));
+        let response = engine.handle(&request(
+            "c2",
+            "load_circuit",
+            &[("format", text("falstad-text")), ("dump", text(DIVIDER))],
+        ));
+        assert_eq!(response.get("ok"), Some(&Value::Bool(true)));
+        // v source + 2 resistors + 2 wires
+        assert_eq!(engine.circuit.elements.len(), 5);
+        let r1 = engine.circuit.elements.iter().find(|e| e.kind == "resistor").unwrap();
+        assert_eq!(r1.params.get("resistance_ohm"), Some(&10000.0));
+        // One node in common between r1 and r2
+        let resistors: Vec<_> = engine.circuit.elements.iter().filter(|e| e.kind == "resistor").collect();
+        assert_eq!(resistors[0].nodes[1], resistors[1].nodes[0]);
+    }
+
+    #[test]
+    fn invalid_document_is_rejected_with_diagnostics() {
+        let mut engine = Engine::new();
+        engine.handle(&request("c1", "create", &[]));
+        let response = engine.handle(&request(
+            "c2",
+            "load_circuit",
+            &[("format", text("electrow-json")), ("dump", text("{\"version\": 99}"))],
+        ));
+        assert_eq!(response.get("ok"), Some(&Value::Bool(false)));
+        let error = response.get("error").unwrap();
+        assert_eq!(error.get("code"), Some(&text("invalid_document")));
+        assert!(error.get("diagnostics").and_then(Value::as_array).unwrap().len() >= 3);
+    }
+
+    #[test]
+    fn export_requires_loaded_document() {
+        let mut engine = Engine::new();
+        engine.handle(&request("c1", "create", &[]));
+        let response = engine.handle(&request("c2", "export_circuit", &[]));
+        assert_eq!(response.get("ok"), Some(&Value::Bool(false)));
+    }
+
+    #[test]
+    fn falstad_text_reports_unsupported_records() {
+        let mut engine = Engine::new();
+        engine.handle(&request("c1", "create", &[]));
+        let dump = "$ 0 5.0E-6 10 63 10.0\nr 0 0 1 1 0 1000\n403 300 300 340 300 1\n";
+        let response = engine.handle(&request(
+            "c2",
+            "load_circuit",
+            &[("format", text("falstad-text")), ("dump", text(dump))],
+        ));
+        assert_eq!(response.get("ok"), Some(&Value::Bool(true)));
+        let unsupported = response
+            .get("result")
+            .and_then(|r| r.get("unsupported"))
+            .and_then(Value::as_array)
+            .unwrap();
+        assert_eq!(unsupported.len(), 1);
+        assert_eq!(unsupported[0].get("type_token"), Some(&text("403")));
     }
 }

@@ -278,3 +278,20 @@ mod tests {
         }
     }
 }
+
+pub fn check_param_value(spec: &ParamSpec, value: f64) -> Option<&'static str> {
+    if !value.is_finite() {
+        return Some("must be finite");
+    }
+    if spec.binary && value != 0.0 && value != 1.0 {
+        return Some("must be 0.0 or 1.0");
+    }
+    if spec.positive && value <= 0.0 {
+        return Some("must be positive");
+    }
+    None
+}
+
+pub fn param_spec(kind: &str, key: &str) -> Option<&'static ParamSpec> {
+    model_spec(kind)?.param(key)
+}
