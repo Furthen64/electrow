@@ -1,6 +1,6 @@
 # Task 02 — Architecture and interface contracts
 
-Status: pending. Depends on 01. Output: docs/architecture.md, interface schema and initial project skeleton.
+Status: complete (2026-11-26). Depends on 01. Outputs: Docs/architecture.md, Docs/interface-schema.json and the versioned Rust/Python/web scaffold; verification recorded in Docs/architecture.md §9.
 
 Rust owns circuit topology, component parameters and dynamic state, matrix assembly, solving, simulation time and measurement samples. Python owns local HTTP hosting, sessions, file operations and transport. Browser HTML/CSS/vanilla JavaScript owns schematic presentation, pointer/keyboard interactions and display of simulation snapshots. No circuit solving in Python or JS.
 

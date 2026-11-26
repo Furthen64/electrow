@@ -1,0 +1,349 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://electrow.local/schema/interface-v1.json",
+  "title": "Electrow engine interface v1",
+  "description": "Versioned command/response contract between Python backend and Rust engine. Transport: one JSON object per line over worker stdin/stdout; one request in flight per worker.",
+  "x-transport": {
+    "framing": "newline-delimited JSON, UTF-8, one object per line",
+    "max_request_bytes": 1048576,
+    "max_response_bytes": 4194304,
+    "in_flight_requests": 1,
+    "ordering": "responses preserve request order within a session",
+    "snapshot_policy": "replaceable frames; clients drop responses whose sequence is not greater than the last applied sequence",
+    "edit_policy": "reliable; always delivered with id, revision and error result"
+  },
+  "definitions": {
+    "commandId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errorCode": {
+      "type": "string",
+      "enum": [
+        "unsupported_version",
+        "bad_request",
+        "unknown_command",
+        "stale_revision",
+        "unknown_element",
+        "unknown_stream",
+        "solver_failed",
+        "engine_unavailable",
+        "internal_error"
+      ]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/definitions/errorCode" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "id", "cmd"],
+      "properties": {
+        "v": { "const": 1 },
+        "id": { "$ref": "#/definitions/commandId" },
+        "cmd": { "type": "string" },
+        "args": { "type": "object", "default": {} }
+      }
+    },
+    "hello": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "hello" },
+            "args": { "type": "object", "additionalProperties": false }
+          }
+        }
+      ]
+    },
+    "create": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "create" },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "circuit_id": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "loadCircuit": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "load_circuit" },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dump", "format"],
+              "properties": {
+                "dump": { "type": "string" },
+                "format": { "enum": ["text", "xml"] },
+                "base_revision": { "$ref": "#/definitions/revision" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "topologyEdit": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "topology_edit" },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["base_revision", "ops"],
+              "properties": {
+                "base_revision": { "$ref": "#/definitions/revision" },
+                "ops": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["op", "element_id"],
+                    "properties": {
+                      "op": { "enum": ["add", "remove", "connect", "disconnect"] },
+                      "element_id": { "type": "string", "minLength": 1 },
+                      "kind": { "type": "string" },
+                      "node_ids": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "maxItems": 8
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "parameterEdit": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "parameter_edit" },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["base_revision", "element_id", "params"],
+              "properties": {
+                "base_revision": { "$ref": "#/definitions/revision" },
+                "element_id": { "type": "string" },
+                "params": {
+                  "type": "object",
+                  "description": "SI base units; keys carry unit suffixes such as resistance_ohm, capacitance_f, voltage_v",
+                  "additionalProperties": { "type": "number" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "reset": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "reset" },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "base_revision": { "$ref": "#/definitions/revision" } }
+            }
+          }
+        }
+      ]
+    },
+    "runPause": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "enum": ["run", "pause"] },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "base_revision": { "$ref": "#/definitions/revision" } }
+            }
+          }
+        }
+      ]
+    },
+    "step": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "step" },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dt_s"],
+              "properties": {
+                "dt_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+                "steps": { "type": "integer", "minimum": 1, "maximum": 10000 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "subscribe": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "subscribe" },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["stream_id", "signals"],
+              "properties": {
+                "stream_id": { "type": "string" },
+                "signals": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id", "element_id", "quantity", "unit"],
+                    "properties": {
+                      "id": { "type": "string" },
+                      "element_id": { "type": "string" },
+                      "quantity": { "enum": ["voltage", "current"] },
+                      "unit": { "enum": ["V", "A"] }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "unsubscribe": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "unsubscribe" },
+            "args": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["stream_id"],
+              "properties": { "stream_id": { "type": "string" } }
+            }
+          }
+        }
+      ]
+    },
+    "snapshotRequest": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "snapshot" },
+            "args": { "type": "object", "additionalProperties": false }
+          }
+        }
+      ]
+    },
+    "shutdown": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "shutdown" },
+            "args": { "type": "object", "additionalProperties": false }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/definitions/hello" },
+    { "$ref": "#/definitions/create" },
+    { "$ref": "#/definitions/loadCircuit" },
+    { "$ref": "#/definitions/topologyEdit" },
+    { "$ref": "#/definitions/parameterEdit" },
+    { "$ref": "#/definitions/reset" },
+    { "$ref": "#/definitions/runPause" },
+    { "$ref": "#/definitions/step" },
+    { "$ref": "#/definitions/subscribe" },
+    { "$ref": "#/definitions/unsubscribe" },
+    { "$ref": "#/definitions/snapshotRequest" },
+    { "$ref": "#/definitions/shutdown" }
+  ],
+  "x-response": {
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "id"],
+      "properties": {
+        "v": { "const": 1 },
+        "id": { "$ref": "#/definitions/commandId" },
+        "ok": { "type": "boolean" },
+        "result": { "type": "object" },
+        "error": { "$ref": "#/definitions/error" }
+      }
+    },
+    "results": {
+      "hello": { "engine_version": "string", "protocol": 1, "capabilities": ["string"] },
+      "ack": { "type": "ack", "circuit_id": "string", "revision": "revision", "sequence": "sequence" },
+      "snapshot": {
+        "type": "snapshot",
+        "circuit_id": "string",
+        "revision": "revision",
+        "sequence": "sequence",
+        "simulation_time_s": "number",
+        "time_step_s": "number",
+        "running": "boolean",
+        "status": ["ready", "running", "converging", "failed"],
+        "nodes": [{ "id": "string", "voltage_v": "number" }],
+        "measurements": [{ "id": "string", "element_id": "string", "quantity": "voltage|current", "value": "number", "unit": "V|A" }],
+        "diagnostics": ["string"]
+      }
+    }
+  },
+  "examples": [
+    { "v": 1, "id": "cmd-1", "cmd": "create", "args": { "circuit_id": "circ-1" } },
+    { "v": 1, "id": "cmd-2", "cmd": "topology_edit", "args": { "base_revision": 1, "ops": [{ "op": "add", "element_id": "r1", "kind": "resistor", "node_ids": ["n0", "n1"] }] } },
+    { "v": 1, "id": "cmd-3", "cmd": "parameter_edit", "args": { "base_revision": 2, "element_id": "r1", "params": { "resistance_ohm": 1000 } } },
+    { "v": 1, "id": "cmd-4", "cmd": "step", "args": { "dt_s": 0.000005, "steps": 100 } },
+    { "v": 1, "id": "cmd-5", "cmd": "subscribe", "args": { "stream_id": "scope-1", "signals": [{ "id": "vout", "element_id": "r1", "quantity": "voltage", "unit": "V" }] } },
+    { "v": 1, "id": "cmd-6", "cmd": "snapshot", "args": {} }
+  ]
+}

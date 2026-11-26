@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Electrow</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>Electrow</h1>
+      <span id="status">disconnected</span>
+    </header>
+    <main>
+      <section class="controls">
+        <button id="hello">Hello</button>
+        <button id="create">Create</button>
+        <button id="add">Add resistor r1</button>
+        <button id="params">Set resistance</button>
+        <button id="subscribe">Subscribe</button>
+        <button id="run">Run</button>
+        <button id="pause">Pause</button>
+        <button id="step">Step 100</button>
+        <button id="reset">Reset</button>
+        <button id="unsubscribe">Unsubscribe</button>
+        <button id="snapshot">Snapshot</button>
+      </section>
+      <section class="controls">
+        <input id="dump" placeholder="load a circuit dump (text/xml)">
+        <button id="load">Load dump</button>
+        <input id="resistance" type="number" value="1000" min="1">
+      </section>
+      <section>
+        <h2>Snapshot</h2>
+        <pre id="snapshot">No snapshot yet.</pre>
+      </section>
+      <section>
+        <h2>Engine response</h2>
+        <pre id="response">No command sent yet.</pre>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,105 @@
+const els = {
+  status: document.getElementById("status"),
+  response: document.getElementById("response"),
+  snapshot: document.getElementById("snapshot"),
+  dump: document.getElementById("dump"),
+  resistance: document.getElementById("resistance"),
+};
+
+let nextId = 1;
+let lastRevision = 0;
+let lastSequence = -1;
+
+function renderSnapshot(snapshot) {
+  els.snapshot.textContent =
+    `circuit: ${snapshot.circuit_id}\n` +
+    `revision: ${snapshot.revision}  sequence: ${snapshot.sequence}\n` +
+    `simulated time: ${snapshot.simulation_time_s} s  step: ${snapshot.time_step_s} s\n` +
+    `running: ${snapshot.running}  status: ${snapshot.status}\n` +
+    `nodes: ${JSON.stringify(snapshot.nodes)}\n` +
+    `measurements: ${JSON.stringify(snapshot.measurements)}`;
+}
+
+async function send(cmd, args = {}) {
+  const request = { v: 1, id: `web-${nextId++}`, cmd, args };
+  try {
+    const result = await fetch("/api/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    const data = await result.json();
+    if (!result.ok || data.ok === false) {
+      const error = data.error || { code: "http", message: `HTTP ${result.status}` };
+      els.response.textContent = `${error.code}: ${error.message}`;
+      els.status.textContent = "error";
+      return null;
+    }
+    const response = data.result;
+    if (typeof response.revision === "number") lastRevision = response.revision;
+    els.response.textContent = JSON.stringify(response, null, 2);
+    els.status.textContent = "connected";
+    if (response && response.type === "snapshot") {
+      if (response.sequence <= lastSequence) {
+        els.status.textContent = "stale frame dropped";
+        return response;
+      }
+      lastSequence = response.sequence;
+      renderSnapshot(response);
+    }
+    return response;
+  } catch (error) {
+    els.response.textContent = String(error);
+    els.status.textContent = "disconnected";
+    return null;
+  }
+}
+
+function bind(id, cmd, args) {
+  const element = document.getElementById(id);
+  element.addEventListener("click", () =>
+    send(cmd, typeof args === "function" ? args() : args || {})
+  );
+}
+
+bind("hello", "hello");
+bind("create", "create");
+bind("add", "topology_edit", () => ({
+  base_revision: lastRevision,
+  ops: [{ op: "add", element_id: "r1", kind: "resistor", node_ids: ["n0", "n1"] }],
+}));
+bind("params", "parameter_edit", () => ({
+  base_revision: lastRevision,
+  element_id: "r1",
+  params: { resistance_ohm: Number(els.resistance.value) },
+}));
+bind("load", "load_circuit", () => ({
+  dump: els.dump.value,
+  format: els.dump.value.trimStart().startsWith("<") ? "xml" : "text",
+  base_revision: lastRevision,
+}));
+bind("subscribe", "subscribe", () => ({
+  stream_id: "scope-1",
+  signals: [{ id: "vout", element_id: "r1", quantity: "voltage", unit: "V" }],
+}));
+bind("unsubscribe", "unsubscribe", { stream_id: "scope-1" });
+bind("run", "run");
+bind("pause", "pause");
+bind("step", "step", { dt_s: 0.000005, steps: 100 });
+bind("reset", "reset");
+bind("snapshot", "snapshot");
+
+async function health() {
+  try {
+    const result = await fetch("/api/health");
+    const data = await result.json();
+    els.status.textContent = result.ok ? "connected" : "error";
+    if (data.engine_version) {
+      els.response.textContent = `engine ${data.engine_version}, protocol ${data.protocol}`;
+    }
+  } catch (error) {
+    els.status.textContent = "disconnected";
+  }
+}
+
+health();
