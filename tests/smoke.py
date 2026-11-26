@@ -1,6 +1,7 @@
 import json
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -163,6 +164,20 @@ def test_http_server():
         server.engine.stop()
 
 
+def test_run_driver():
+    client = EngineClient()
+    try:
+        client.command("create", {"circuit_id": "circ-run"})
+        client.command("run")
+        time.sleep(0.2)
+        client.command("pause")
+        snapshot = client.command("snapshot")
+        check(snapshot["simulation_time_s"] > 0, "run driver must advance simulated time")
+        check(snapshot["running"] is False, "pause must stop the driver")
+    finally:
+        client.stop()
+
+
 def test_solver_round_trip():
     client = EngineClient()
     try:
@@ -230,6 +245,7 @@ def test_solver_round_trip():
 
 if __name__ == "__main__":
     test_engine_client()
+    test_run_driver()
     test_solver_round_trip()
     test_http_server()
     print("SMOKE OK: Rust worker, versioned protocol, solver and HTTP round trip")

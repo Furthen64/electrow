@@ -1,6 +1,6 @@
 # Fix 07 — Clear a failed status on later success
 
-Status: pending
+Status: complete (2026-11-26). Centralized `refresh_status()` from `(running, last_step_failed)`; successful steps now recover from `"failed"`. Added `status_recovers_after_successful_step`; 80 tests pass.
 Severity: medium (misleading UI/snapshot state)
 
 ## Problem

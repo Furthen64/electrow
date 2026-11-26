@@ -38,7 +38,7 @@ Let `a`, `b` be node indices, with index 0 omitted from the matrix (ground fixed
 
 ## 4. Linear solve
 
-Dense LU decomposition with partial pivoting, row swaps applied to the RHS, then forward/back substitution. Matches the dense path in `SimulationManager.lu_factor_dense`/`lu_solve_dense`; no iterative solver and no sparse path yet. A pivot magnitude below `1e-12` is treated as singular (reference also rejects zero pivots, `SimulationManager.java:1781-1784`). Matrix and RHS are copied before factorization so the stamped structure remains inspectable and reusable across Newton iterations.
+Dense LU decomposition with partial pivoting, row swaps applied to the RHS, then forward/back substitution. Matches the dense path in `SimulationManager.lu_factor_dense`/`lu_solve_dense`; no iterative solver and no sparse path yet. A pivot is treated as singular when `|pivot| <= 1e-12 * column_scale`, where `column_scale` is the largest absolute entry in that column of the original matrix. A zero column therefore has a zero threshold and remains singular, while high-impedance networks (e.g. 100 GΩ resistors, `g = 1e-11`) solve correctly instead of being rejected by a fixed absolute cutoff. The reference also rejects zero pivots (`SimulationManager.java:1781-1784`). Matrix and RHS are copied before factorization so the stamped structure remains inspectable and reusable across Newton iterations.
 
 Sparse strategy is explicitly deferred: Vactrol/LVLabs select sparse LU when the largest matrix reaches `SPARSE_THRESHOLD = 150` (`SimulationManager.java:46,1011-1018`). The Rust port starts dense-only; Task 09 will choose from measured circuit sizes.
 
@@ -54,6 +54,7 @@ Sparse strategy is explicitly deferred: Vactrol/LVLabs select sparse LU when the
 - Trapezoidal companion models only in this slice. Backward Euler is available in the references via `compResistance = timeStep/C`; it is not implemented yet.
 - Initial `dt = 5e-6 s`, minimum `5e-11 s`, maximum `5e-6 s`, matching Falstad's `maxTimeStep/minTimeStep` defaults (`CircuitLoader.java:49-50`; SEVA77 `CirSim.java:4384-4385`).
 - On a successful step, simulated time increases by the accepted dt. After 3 consecutive accepted steps, dt doubles up to the maximum. On rejection, dt halves and the previous accepted state and time are restored before retrying, up to 8 halvings; the same limit as the reference's timestep-halving loop (`SimulationManager.java:1390-1407`).
+- `dt_s` in a `step` command is the initial timestep only: it is used for the first step after `create`/`reset`, and later calls continue from the already-adapted `current_dt` (clamped to `[min_dt_s, max_dt_s]`). This lets adaptation persist across one-step-per-request API usage; repeated `step(dt, 1)` calls behave like one `step(dt, 3)` call. `reset()` restores the default initial dt.
 - Simulated time is independent of wall-clock cadence and of the number of Newton iterations, matching the Task 02 contract.
 
 ## 7. State ownership and rollback
@@ -83,7 +84,7 @@ Parameter validation rejects non-positive resistance/capacitance/inductance and 
 
 Implemented: wires (node merging), ground, resistors, independent voltage/current sources, switches, capacitors, inductors, diodes, simplified BJTs and MOSFETs; linear solve; trapezoidal transient; Newton iteration; rollback and diagnostics.
 
-Deferred: controlled sources, op-amps, digital models (Task 04); circuit dump/XML parsing and dumps (Task 05); browser rendering and scopes (Task 07); sparse solver and profiling (Task 09); Vactrol/avalanche/audio (Task 10).
+Deferred: controlled sources, op-amps and digital models; browser rendering and scopes (Task 07); sparse solver and profiling (Task 09); Vactrol/avalanche/audio (Task 10). Circuit JSON, Falstad text and XML import are implemented (Task 05).
 
 ## 10. Default parameters
 

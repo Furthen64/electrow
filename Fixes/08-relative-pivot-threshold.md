@@ -1,6 +1,6 @@
 # Fix 08 — Use a relative pivot threshold in LU solve
 
-Status: pending
+Status: complete (2026-11-26). LU pivot check now uses `PIVOT_EPSILON * column_scale[k]` instead of a fixed `1e-12`; documented in `solver-algorithms.md` §4. Added `high_value_resistor_divider_is_not_singular`; 81 tests pass.
 Severity: medium (false errors on high-value components)
 
 ## Problem

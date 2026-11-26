@@ -1,6 +1,6 @@
 # Fix 13 — Bound XML parser recursion and reject trailing content
 
-Status: pending
+Status: complete (2026-11-26). `parse_element()` now takes a depth capped at 64; `parse_document()` rejects trailing content after the root. Added `xml_rejects_deep_nesting_and_trailing_content`; 86 tests pass.
 Severity: medium (stack overflow / silently accepted input)
 
 ## Problem

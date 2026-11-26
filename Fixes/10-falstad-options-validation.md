@@ -1,6 +1,6 @@
 # Fix 10 — Validate Falstad options on import
 
-Status: pending
+Status: complete (2026-11-26). Added shared `circuit_doc::validate_circuit_options()` used by the Falstad importer; invalid timesteps/ranges now reject with line context. Added `rejects_invalid_timestep_and_range_options`; 83 tests pass.
 Severity: medium (invalid simulation settings)
 
 ## Problem

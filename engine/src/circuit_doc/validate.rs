@@ -1,6 +1,6 @@
 //! Schema validation (format, version, ids, options, elements, params).
 
-use super::types::{DocDiagnostic, MAX_ELEMENTS, MAX_ID_LEN, MAX_TITLE_LEN};
+use super::types::{CircuitOptions, DocDiagnostic, MAX_ELEMENTS, MAX_ID_LEN, MAX_TITLE_LEN};
 use super::CIRCUIT_DOC_FORMAT;
 use crate::json::Value;
 use crate::models;
@@ -76,11 +76,76 @@ pub fn parse_document_value(value: &Value, diagnostics: &mut Vec<DocDiagnostic>)
     }
 }
 
+/// Validate already-parsed options, shared by the Falstad text and XML importers.
+pub fn validate_circuit_options(options: &CircuitOptions) -> Result<(), DocDiagnostic> {
+    if !options.max_time_step_s.is_finite()
+        || options.max_time_step_s <= 0.0
+        || options.max_time_step_s > 1.0
+    {
+        return Err(DocDiagnostic::err(
+            "invalid_options",
+            "max_time_step_s must be in (0, 1]",
+        ));
+    }
+    if !options.min_time_step_s.is_finite()
+        || options.min_time_step_s <= 0.0
+        || options.min_time_step_s > options.max_time_step_s
+    {
+        return Err(DocDiagnostic::err(
+            "invalid_options",
+            "min_time_step_s must be in (0, max_time_step_s]",
+        ));
+    }
+    if !options.voltage_range.is_finite()
+        || options.voltage_range <= 0.0
+        || options.voltage_range > 1e6
+    {
+        return Err(DocDiagnostic::err(
+            "invalid_options",
+            "voltage_range must be in (0, 1e6]",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_options(value: Option<&Value>, diagnostics: &mut Vec<DocDiagnostic>) {
     let Some(value) = value else { return };
     if !matches!(value, Value::Object(_)) {
         diagnostics.push(DocDiagnostic::err("invalid_options", "options must be an object"));
         return;
+    }
+    for key in [
+        "max_time_step_s",
+        "min_time_step_s",
+        "voltage_range",
+        "flags",
+    ] {
+        if let Some(field) = value.get(key) {
+            if field.as_f64().is_none() {
+                diagnostics.push(DocDiagnostic::err(
+                    "invalid_options",
+                    format!("options.{key} must be a number"),
+                ));
+            }
+        }
+    }
+    for key in ["adjust_time_step", "auto_dc_on_reset"] {
+        if let Some(field) = value.get(key) {
+            if !matches!(field, Value::Bool(_)) {
+                diagnostics.push(DocDiagnostic::err(
+                    "invalid_options",
+                    format!("options.{key} must be a boolean"),
+                ));
+            }
+        }
+    }
+    if let Some(flags) = value.get("flags").and_then(Value::as_u64) {
+        if flags > u32::MAX as u64 {
+            diagnostics.push(DocDiagnostic::err(
+                "invalid_options",
+                "options.flags must fit in u32",
+            ));
+        }
     }
     let max = value.get("max_time_step_s").and_then(Value::as_f64).unwrap_or(5e-6);
     let min = value.get("min_time_step_s").and_then(Value::as_f64).unwrap_or(50e-12);
@@ -183,6 +248,15 @@ fn validate_element(
         }
     }
 
+    if let Some(params) = element.get("params") {
+        if !matches!(params, Value::Object(_)) {
+            diagnostics.push(DocDiagnostic::for_element(
+                "invalid_params",
+                "params must be an object",
+                id,
+            ));
+        }
+    }
     if let Some(Value::Object(entries)) = element.get("params") {
         for (key, value) in entries {
             let Some(number) = value.as_f64() else {
@@ -212,12 +286,23 @@ fn validate_element(
     }
 
     if let Some(geometry) = element.get("geometry") {
-        if geometry.get("flags").is_some_and(|f| f.as_f64().unwrap_or(f64::NAN).fract() != 0.0) {
+        if !matches!(geometry, Value::Object(_)) {
             diagnostics.push(DocDiagnostic::for_element(
                 "invalid_geometry",
-                "geometry.flags must be an integer",
+                "geometry must be an object",
                 id,
             ));
+            return;
+        }
+        if let Some(flags) = geometry.get("flags") {
+            match flags.as_u64() {
+                Some(flags) if flags <= u32::MAX as u64 => {}
+                _ => diagnostics.push(DocDiagnostic::for_element(
+                    "invalid_geometry",
+                    "geometry.flags must be a non-negative integer within u32 range",
+                    id,
+                )),
+            }
         }
         for key in ["x1", "y1", "x2", "y2"] {
             match geometry.get(key).and_then(Value::as_f64) {

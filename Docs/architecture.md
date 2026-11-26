@@ -10,7 +10,7 @@ This document freezes the boundaries, transport and data contracts for the first
 |---|---|---|
 | Rust/Python boundary | Persistent Rust worker process with newline-delimited JSON over stdin/stdout | PyO3/maturin extension (not implemented) |
 | Python HTTP layer | `http.server.ThreadingHTTPServer`, stdlib only, loopback bind | Third-party framework + WebSocket server |
-| Browser | Static HTML/CSS/vanilla JS; snapshot pull via `GET /api/snapshot` | Heavy frontend framework / persistent socket in MVP |
+| Browser | Static HTML/CSS/vanilla JS; snapshot pull via `POST /api/command` (`cmd: "snapshot"`) while running | Heavy frontend framework / persistent socket in MVP |
 | Wire format | Versioned JSON envelopes, `v: 1` | Unversioned line protocol (previous scaffold) |
 | Edit safety | Monotonic `revision`, `base_revision` required for edits, stale edits rejected | Last-write-wins mutation |
 | Frame safety | Monotonic `sequence`, consumers drop `sequence <= last seen` | Applying every queued snapshot |
@@ -66,7 +66,7 @@ sequenceDiagram
 | Revision counter, snapshot sequence counter | Rust | Authoritative; Python/browser cache them only for validation |
 | Session lifecycle, worker process, request ids, file paths | Python | One session per worker process |
 | Last applied revision/sequence, camera/zoom, widget state | Browser | Display cache; never authoritative |
-| Wall-clock frame cadence | Browser/Python | 16 ms display cadence in UI; not physics time |
+| Wall-clock frame cadence | Browser/Python | Python driver ticks every 16 ms while `running`, issuing bounded `step` commands; browser polls snapshots every 50 ms. Neither cadence is physics time. |
 
 **No duplicate solver state.** Python does not recompute voltages or currents; JavaScript does not solve circuits. Task 01 showed the reference solvers own `nodeVoltages`, `circuitMatrix`, `circuitNonLinear` and `t` inside `CirSim`/`SimulationManager`; the Rust engine will own the equivalents.
 
@@ -91,7 +91,7 @@ Trade-off accepted: per-message JSON overhead and process startup. This is accep
 - One request in flight per worker; `EngineClient` serializes access with an `RLock`, so HTTP handler threads cannot interleave writes.
 - Request envelope: `{v:1, id, cmd, args}`; response: `{v:1, id, ok, result}` or `{v:1, id, ok:false, error:{code,message,retryable}}`.
 - Request size ≤ 1 MiB; response size ≤ 4 MiB; command `id` ≤ 128 chars; `steps` ≤ 10,000; subscribed signals ≤ 64.
-- Reliable messages: edits/errors always carry `id`, `revision` and a result/error. They are never coalesced.
+- Reliable messages: successful edits carry `id` and the new `revision`; errors carry `id`, `code`, `message` and `retryable` (no revision, since an error may occur before a circuit exists). Snapshots are replaceable and may be coalesced.
 - Replaceable frames: snapshots carry `sequence`; clients drop frames with `sequence <= last seen`. In the MVP snapshots are pulled, so no queue can grow; a future streaming subscription will use a bounded ring buffer (planned 4096 samples/signal, latest wins).
 - Safe edit boundaries: the worker handles one command at a time and applies edits only between simulation steps. `base_revision` is mandatory for `topology_edit`/`parameter_edit` and optional for control commands; mismatches return `stale_revision`.
 - Time separation: `simulation_time_s` advances only via `step` (currently) or solver stepping (Task 03). Wall-clock timers in the browser drive display only.
@@ -116,7 +116,7 @@ Full schema, including per-command argument validation and examples, is in [inte
 | `snapshot` | — | `snapshot` object |
 | `shutdown` | — | `ack`, then worker exits |
 
-Error codes: `unsupported_version`, `bad_request`, `unknown_command`, `stale_revision`, `unknown_element`, `unknown_stream`, `solver_failed`, `engine_unavailable`, `internal_error`.
+Error codes: `unsupported_version`, `bad_request`, `unknown_command`, `stale_revision`, `unknown_element`, `unknown_stream`, `bad_document`, `invalid_document`, `no_document`, `session_lost`, `host_not_allowed`, `not_found`, `invalid_request_size`, `engine_unavailable`, `internal_error`.
 
 Units: protocol values are SI base units with explicit suffixes in keys/fields — `dt_s`, `simulation_time_s`, `time_step_s`, `voltage_v`, `resistance_ohm`, `capacitance_f`, measurement `unit` of `V`/`A`. Display formatting (mV, µs, kΩ) belongs to the browser.
 
@@ -144,7 +144,7 @@ Stale edit example:
 {"v":1,"id":"cmd-6","ok":false,"error":{"code":"stale_revision","message":"expected revision 3, got 2","retryable":false}}
 ```
 
-HTTP mapping: `/api/command` forwards the envelope verbatim (validated) and preserves its `id`; engine errors with client codes map to HTTP 400, engine failure to 503. `GET /api/health` calls `hello`; `GET /api/snapshot` returns a snapshot pulled from the worker. Static files are served from `web/` with a path-traversal guard. `Host` must be loopback; if `Origin` is present it must also be loopback HTTP. Request bodies are capped at 1 MiB.
+HTTP mapping: `/api/command` validates the envelope fields (`v`, `id`, `cmd`, `args`) and preserves its `id`; engine errors with client codes map to HTTP 400, engine failure and session loss to 503. `GET /api/health` calls `hello`; `GET /api/snapshot` returns a snapshot pulled from the worker. Static files are served from `web/` with a path-traversal guard. `Host` must be loopback; if `Origin` is present it must also be loopback HTTP. Request bodies are capped at 1 MiB.
 
 ## 6. Project layout
 
@@ -206,14 +206,14 @@ The browser then opens at `http://127.0.0.1:8000/`. `ELECTROW_ENGINE` overrides 
 | Check | Command | Result |
 |---|---|---|
 | Toolchain | `./checkreqs.ps1` | cargo 1.100.0, rustc 1.100.0, Python 3.12.6 OK |
-| Rust protocol/state tests | `cargo test --workspace` | 8 passed, 0 failed (JSON round trip, version check, revision enforcement, step/sequence, subscriptions, shutdown) |
+| Rust protocol/state tests | `cargo test --workspace` | 91 passed, 0 failed (solver fixtures, circuit documents, Falstad/XML import, JSON protocol, revision enforcement, step/sequence, subscriptions, shutdown) |
 | Rust binary | `cargo build --workspace` | built `target/debug/electrow-engine.exe` |
 | Real worker + HTTP round trip | `python tests/smoke.py` | `SMOKE OK`: hello, create, edits, stale rejection, subscribe, step, snapshot, run/pause/reset, static assets, health, 400/403 mapping |
 | Python syntax | `python -m compileall -q backend tests` | pass |
 | Browser script syntax | `node --check web/app.js` | pass |
 | Browser behavior | Manual UI check | Not automated (no headless browser in this environment); static assets and the same API calls were exercised over HTTP by the smoke test |
 
-Known limitation: the solver supports resistors, ideal sources, switches, capacitors, inductors, diodes, wires and ground only, plus simplified BJTs and MOSFETs (basic active models, no body diodes or saturation models). Controlled sources, op-amps, digital models arrive later in Task 04; circuit dump/XML parsing arrives in Task 05.
+Known limitation: the solver supports resistors, ideal sources, switches, capacitors, inductors, diodes, wires and ground, plus simplified BJTs and MOSFETs (no body diodes or saturation models). Controlled sources, op-amps and digital models are deferred. Circuit JSON, Falstad text and XML import are implemented (Task 05); browser schematic editing and scopes remain in Task 07.
 
 ## 10. Deferred decisions
 

@@ -35,7 +35,13 @@
         "stale_revision",
         "unknown_element",
         "unknown_stream",
-        "solver_failed",
+        "bad_document",
+        "invalid_document",
+        "no_document",
+        "session_lost",
+        "host_not_allowed",
+        "not_found",
+        "invalid_request_size",
         "engine_unavailable",
         "internal_error"
       ]
@@ -101,10 +107,21 @@
               "required": ["dump", "format"],
               "properties": {
                 "dump": { "type": "string" },
-                "format": { "enum": ["text", "xml"] },
+                "format": { "enum": ["electrow-json", "falstad-text", "text", "xml"] },
                 "base_revision": { "$ref": "#/definitions/revision" }
               }
             }
+          }
+        }
+      ]
+    },
+    "exportCircuit": {
+      "allOf": [
+        { "$ref": "#/definitions/envelope" },
+        {
+          "properties": {
+            "cmd": { "const": "export_circuit" },
+            "args": { "type": "object", "additionalProperties": false }
           }
         }
       ]
@@ -212,7 +229,12 @@
               "additionalProperties": false,
               "required": ["dt_s"],
               "properties": {
-                "dt_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+                "dt_s": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1,
+                  "description": "Initial timestep after create/reset; later calls continue from the adapted timestep."
+                },
                 "steps": { "type": "integer", "minimum": 1, "maximum": 10000 }
               }
             }
@@ -297,6 +319,7 @@
     { "$ref": "#/definitions/hello" },
     { "$ref": "#/definitions/create" },
     { "$ref": "#/definitions/loadCircuit" },
+    { "$ref": "#/definitions/exportCircuit" },
     { "$ref": "#/definitions/topologyEdit" },
     { "$ref": "#/definitions/parameterEdit" },
     { "$ref": "#/definitions/reset" },
@@ -331,7 +354,7 @@
         "simulation_time_s": "number",
         "time_step_s": "number",
         "running": "boolean",
-        "status": ["ready", "running", "converging", "failed"],
+        "status": ["ready", "running", "failed"],
         "nodes": [{ "id": "string", "voltage_v": "number" }],
         "measurements": [{ "id": "string", "element_id": "string", "quantity": "voltage|current", "value": "number", "unit": "V|A" }],
         "diagnostics": [{ "kind": "no_ground|floating_node|singular_matrix|invalid_value|non_convergence", "node_id": "string?", "element_id": "string?", "parameter": "string?", "iterations": "integer?", "change_v": "number?" }]
@@ -344,6 +367,7 @@
     { "v": 1, "id": "cmd-3", "cmd": "parameter_edit", "args": { "base_revision": 2, "element_id": "r1", "params": { "resistance_ohm": 1000 } } },
     { "v": 1, "id": "cmd-4", "cmd": "step", "args": { "dt_s": 0.000005, "steps": 100 } },
     { "v": 1, "id": "cmd-5", "cmd": "subscribe", "args": { "stream_id": "scope-1", "signals": [{ "id": "vout", "element_id": "r1", "quantity": "voltage", "unit": "V" }] } },
-    { "v": 1, "id": "cmd-6", "cmd": "snapshot", "args": {} }
+    { "v": 1, "id": "cmd-6", "cmd": "snapshot", "args": {} },
+    { "v": 1, "id": "cmd-7", "cmd": "export_circuit", "args": {} }
   ]
 }

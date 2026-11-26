@@ -35,6 +35,7 @@ pub struct Engine {
     sequence: u64,
     running: bool,
     status: String,
+    last_step_failed: bool,
     circuit: Circuit,
     subscriptions: Vec<Subscription>,
     loaded_dump: Option<String>,
@@ -91,6 +92,7 @@ impl Engine {
             sequence: 0,
             running: false,
             status: "ready".to_string(),
+            last_step_failed: false,
             circuit: Circuit::new(),
             subscriptions: Vec::new(),
             loaded_dump: None,
@@ -191,6 +193,17 @@ impl Engine {
         self.sequence += 1;
     }
 
+    fn refresh_status(&mut self) {
+        self.status = if self.last_step_failed {
+            "failed"
+        } else if self.running {
+            "running"
+        } else {
+            "ready"
+        }
+        .to_string();
+    }
+
     fn check_base(&self, args: &Value, required: bool) -> Result<(), (&'static str, String)> {
         match args.get("base_revision") {
             None if required => Err(("bad_request", "base_revision is required".to_string())),
@@ -216,7 +229,8 @@ impl Engine {
         self.sequence = 0;
         self.circuit = Circuit::new();
         self.running = false;
-        self.status = "ready".to_string();
+        self.last_step_failed = false;
+        self.refresh_status();
         self.subscriptions.clear();
         self.loaded_dump = None;
         self.bump_sequence();
@@ -281,7 +295,8 @@ impl Engine {
         self.loaded_document = Some(document.clone());
         self.circuit_id = document.circuit_id.clone();
         self.running = false;
-        self.status = "ready".to_string();
+        self.last_step_failed = false;
+        self.refresh_status();
         self.revision += 1;
         self.bump_sequence();
         ok(id, self.ack_with_document(id, unsupported, warnings))
@@ -360,7 +375,15 @@ impl Engine {
         let Some(document) = &self.loaded_document else {
             return fail(id, "no_document", "no circuit document has been loaded");
         };
-        ok(id, circuit_doc::document_to_json(document))
+        let value = circuit_doc::document_to_json(document);
+        if value.has_non_finite() {
+            return fail(
+                id,
+                "invalid_document",
+                "circuit document contains a non-finite value",
+            );
+        }
+        ok(id, value)
     }
 
     fn topology_edit(&mut self, id: &str, args: &Value) -> Value {
@@ -452,7 +475,8 @@ impl Engine {
         }
         self.circuit.reset();
         self.running = false;
-        self.status = "ready".to_string();
+        self.last_step_failed = false;
+        self.refresh_status();
         self.bump_sequence();
         ok(id, self.ack(id))
     }
@@ -462,7 +486,7 @@ impl Engine {
             return fail(id, code, message);
         }
         self.running = running;
-        self.status = if running { "running" } else { "ready" }.to_string();
+        self.refresh_status();
         self.bump_sequence();
         ok(id, self.ack(id))
     }
@@ -483,9 +507,8 @@ impl Engine {
             return fail(id, "bad_request", "steps must be in [1, 10000]");
         }
         let outcome = self.circuit.step(dt, steps);
-        if outcome.failed {
-            self.status = "failed".to_string();
-        }
+        self.last_step_failed = outcome.failed;
+        self.refresh_status();
         self.bump_sequence();
         ok(id, self.ack(id))
     }
@@ -692,6 +715,65 @@ mod tests {
         assert!(is_ok(&response));
         assert!((engine.simulation_time_s() - 5e-4).abs() < 1e-12);
         assert_eq!(engine.sequence(), before + 1);
+    }
+
+    #[test]
+    fn status_recovers_after_successful_step() {
+        let mut engine = Engine::new();
+        engine.handle(&request("c1", "create", &[]));
+        let initial = Value::Array(vec![
+            obj(&[
+                ("op", text("add")),
+                ("element_id", text("g")),
+                ("kind", text("ground")),
+                ("node_ids", Value::Array(vec![text("gnd")])),
+            ]),
+            obj(&[
+                ("op", text("add")),
+                ("element_id", text("r")),
+                ("kind", text("resistor")),
+                ("node_ids", Value::Array(vec![text("n1"), text("n2")])),
+            ]),
+        ]);
+        engine.handle(&request(
+            "c2",
+            "topology_edit",
+            &[("base_revision", num(1.0)), ("ops", initial)],
+        ));
+        engine.handle(&request(
+            "c3",
+            "step",
+            &[("dt_s", num(5e-6)), ("steps", num(1.0))],
+        ));
+        let snapshot = engine
+            .handle(&request("c4", "snapshot", &[]))
+            .get("result")
+            .unwrap()
+            .clone();
+        assert_eq!(snapshot.get("status"), Some(&text("failed")));
+
+        let wire = Value::Array(vec![obj(&[
+            ("op", text("add")),
+            ("element_id", text("w")),
+            ("kind", text("wire")),
+            ("node_ids", Value::Array(vec![text("n1"), text("gnd")])),
+        ])]);
+        engine.handle(&request(
+            "c5",
+            "topology_edit",
+            &[("base_revision", num(2.0)), ("ops", wire)],
+        ));
+        engine.handle(&request(
+            "c6",
+            "step",
+            &[("dt_s", num(5e-6)), ("steps", num(1.0))],
+        ));
+        let snapshot = engine
+            .handle(&request("c7", "snapshot", &[]))
+            .get("result")
+            .unwrap()
+            .clone();
+        assert_eq!(snapshot.get("status"), Some(&text("ready")));
     }
 
     #[test]

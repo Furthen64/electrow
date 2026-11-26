@@ -1,6 +1,6 @@
 # Fix 17 — Make serialization reject non-finite numbers symmetrically
 
-Status: pending
+Status: complete (2026-11-26). Added `Value::has_non_finite()`; `export_circuit` and the worker's response writer now emit protocol errors instead of `null` for non-finite values. Added `detects_non_finite_values`; 91 tests pass; smoke test OK.
 Severity: low (export/re-import asymmetry)
 
 ## Problem

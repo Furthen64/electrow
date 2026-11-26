@@ -1,6 +1,6 @@
 # Fix 22 — Reduce solver allocations and linear lookups (measure first)
 
-Status: pending
+Status: complete (2026-11-26). Added ignored benchmark harness (`benchmark_divider_chain`, 40 resistors × 1000 steps). Eliminated one full `State` clone per step (`commit` takes ownership), replaced per-iteration linear element lookups with precomputed indices, and removed the LU input copy with `lu_solve_owned` + `mem::take`. Debug: 4.61 s → ~4.4–4.5 s (runs vary ~3%). Release: ~129 ms for the same benchmark. All 91 tests still pass; no numerical changes.
 Severity: low-medium (performance; Task 09 territory)
 
 ## Problem

@@ -1,6 +1,6 @@
 # Fix 19 — Harden the engine client lifecycle
 
-Status: pending
+Status: complete (2026-11-26). Worker I/O is now binary with a 5 s `select` timeout; oversized responses are drained before failing so the stream cannot desync; crashes surface `session_lost` and the UI resets its revision cache; killed workers are reaped. Server handler threads are daemonized. Smoke test OK.
 Severity: medium-high (server wedge / protocol desync / silent state loss)
 
 ## Problem

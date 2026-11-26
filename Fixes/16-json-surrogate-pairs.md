@@ -1,6 +1,6 @@
 # Fix 16 — Combine UTF-16 surrogate pairs in JSON strings
 
-Status: pending
+Status: complete (2026-11-26). `\u` escapes now combine high+low surrogates into the non-BMP code point and reject unpaired surrogates. Added `combines_surrogate_pairs_and_rejects_lone_surrogates`; 90 tests pass.
 Severity: low (data corruption)
 
 ## Problem

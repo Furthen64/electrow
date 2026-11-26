@@ -1,6 +1,6 @@
 # Fix 15 — Reject wrong-typed params/options in circuit_doc
 
-Status: pending
+Status: complete (2026-11-26). `validate.rs` now rejects wrong-typed `params`/`options`/`geometry`, non-boolean flags, negative/oversized integer flags and wrong-typed booleans instead of silently defaulting. Added `rejects_wrong_typed_fields`; 89 tests pass.
 Severity: low (malformed input silently accepted)
 
 ## Problem

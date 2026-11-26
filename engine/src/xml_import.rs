@@ -17,6 +17,7 @@ use std::collections::HashMap;
 
 const MAX_XML_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ELEMENTS: usize = 4096;
+const MAX_XML_DEPTH: usize = 64;
 
 #[derive(Clone, Debug)]
 struct XmlNode {
@@ -145,7 +146,10 @@ impl<'a> XmlParser<'a> {
         }
     }
 
-    fn parse_element(&mut self) -> Result<XmlNode, DocDiagnostic> {
+    fn parse_element(&mut self, depth: usize) -> Result<XmlNode, DocDiagnostic> {
+        if depth > MAX_XML_DEPTH {
+            return self.fail("invalid_xml", "maximum element nesting depth exceeded");
+        }
         self.skip_ignorable()?;
         let rest = self.rest();
         if !rest.starts_with('<') {
@@ -227,7 +231,7 @@ impl<'a> XmlParser<'a> {
                 }
             }
             if rest.starts_with('<') {
-                let child = self.parse_element()?;
+                let child = self.parse_element(depth + 1)?;
                 children.push(child);
                 continue;
             }
@@ -248,7 +252,15 @@ fn parse_document(text: &str) -> Result<XmlNode, DocDiagnostic> {
     if !rest.starts_with('<') || rest.starts_with("</") {
         return Err(DocDiagnostic::err("invalid_xml", "expected the root element"));
     }
-    parser.parse_element()
+    let root = parser.parse_element(0)?;
+    parser.skip_ignorable()?;
+    if !parser.rest().is_empty() {
+        return Err(DocDiagnostic::err(
+            "invalid_xml",
+            format!("unexpected trailing content at {}", parser.pos),
+        ));
+    }
+    Ok(root)
 }
 
 struct ElementOutcome {
@@ -331,32 +343,25 @@ fn parse_options(root: &XmlNode) -> Result<(CircuitOptions, Vec<String>), DocDia
         .attr_f64("mts")
         .unwrap_or(CircuitOptions::default().min_time_step_s);
 
-    let voltage_range = root.attr_f64("vr").unwrap_or(0.0);
-    if voltage_range > 0.0 {
-        // keep
-    } else if root.attr("vr").is_some() {
-        return Err(DocDiagnostic::err(
-            "invalid_options",
-            format!("voltageRange must be positive; got {voltage_range}"),
-        ));
-    }
+    let voltage_range = root
+        .attr_f64("vr")
+        .unwrap_or_else(|| CircuitOptions::default().voltage_range);
 
     if root.attr_i64("st").is_some() {
         warnings.push("solver type is not imported".to_string());
     }
 
-    Ok((
-        CircuitOptions {
-            flags,
-            max_time_step_s,
-            adjust_time_step: (flags & 64) != 0,
-            auto_dc_on_reset: (flags & 128) != 0,
-            voltage_range,
-            min_time_step_s,
-            ..CircuitOptions::default()
-        },
-        warnings,
-    ))
+    let options = CircuitOptions {
+        flags,
+        max_time_step_s,
+        adjust_time_step: (flags & 64) != 0,
+        auto_dc_on_reset: (flags & 128) != 0,
+        voltage_range,
+        min_time_step_s,
+        ..CircuitOptions::default()
+    };
+    crate::circuit_doc::validate_circuit_options(&options)?;
+    Ok((options, warnings))
 }
 
 fn process_element(tag: &str, index: usize, node: &XmlNode) -> ElementOutcome {
@@ -732,6 +737,43 @@ w 112 368 240 368 0
     fn xml_rejects_bad_options() {
         let err = parse_xml_import("<circuit f=\"0\" ts=\"5.0E-6\" vr=\"0\"/>").unwrap_err();
         assert_eq!(err.code, "invalid_options");
+    }
+
+    #[test]
+    fn xml_zero_length_element_is_reported() {
+        let xml = "<circuit f=\"0\" ts=\"5.0E-6\" vr=\"10\"><r x=\"100 100 100 100\" f=\"0\" r=\"1000\"/></circuit>";
+        let import = parse_xml_import(xml).unwrap();
+        assert!(import.document.elements.is_empty());
+        assert_eq!(import.unsupported.len(), 1);
+        assert!(import.unsupported[0].reason.contains("zero-length"));
+    }
+
+    #[test]
+    fn xml_rejects_deep_nesting_and_trailing_content() {
+        let nested = format!(
+            "<circuit>{}</circuit>",
+            format_args!("{}{}", "<a>".repeat(100), "</a>".repeat(100))
+        );
+        let err = parse_xml_import(&nested).expect_err("deep nesting must be rejected");
+        assert_eq!(err.code, "invalid_xml");
+
+        let trailing = "<circuit f=\"0\" ts=\"5.0E-6\" vr=\"10\"/><extra/>";
+        let err = parse_xml_import(trailing).expect_err("trailing content must be rejected");
+        assert_eq!(err.code, "invalid_xml");
+    }
+
+    #[test]
+    fn xml_rejects_non_finite_and_inverted_options() {
+        for root in [
+            "<circuit f=\"0\" ts=\"5.0E-6\" vr=\"inf\"/>",
+            "<circuit f=\"0\" ts=\"5.0E-6\" vr=\"10\" mts=\"NaN\"/>",
+            "<circuit f=\"0\" ts=\"5.0E-6\" vr=\"10\" mts=\"-1\"/>",
+            "<circuit f=\"0\" ts=\"5.0E-6\" vr=\"10\" mts=\"1e-3\"/>",
+            "<circuit f=\"0\" ts=\"1e7\" vr=\"10\"/>",
+        ] {
+            let err = parse_xml_import(root).expect_err("invalid options must be rejected");
+            assert_eq!(err.code, "invalid_options");
+        }
     }
 
     #[test]

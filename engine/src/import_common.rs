@@ -2,8 +2,10 @@
 //! and node-id assignment. Used by the Falstad text and reference-XML
 //! importers so both produce identical documents for equivalent files.
 
-use crate::circuit_doc::CircuitElement;
+use crate::circuit_doc::{CircuitElement, Geometry};
 use std::collections::HashMap;
+
+const MAX_COORD: i64 = 1_000_000;
 
 #[derive(Clone, Debug)]
 pub(crate) struct PendingRecord {
@@ -17,6 +19,13 @@ pub(crate) struct GeometryFailure {
     pub line: usize,
     pub type_token: String,
     pub reason: String,
+}
+
+fn coords_in_range(geometry: &Geometry) -> bool {
+    geometry.x1.saturating_abs() <= MAX_COORD
+        && geometry.y1.saturating_abs() <= MAX_COORD
+        && geometry.x2.saturating_abs() <= MAX_COORD
+        && geometry.y2.saturating_abs() <= MAX_COORD
 }
 
 fn sign(x: i64) -> i64 {
@@ -34,7 +43,7 @@ fn sign(x: i64) -> i64 {
 //       c.x = floor(a.x*(1-f)+b.x*f + g*gx + .48); c.y = floor(...+g*gy+.48)
 fn interp_point2(a: (i64, i64), b: (i64, i64), f: f64, g: f64) -> [(i64, i64); 2] {
     let (gx, gy) = (b.1 - a.1, a.0 - b.0);
-    let g_mag = ((gx * gx + gy * gy) as f64).sqrt();
+    let g_mag = ((gx as f64) * (gx as f64) + (gy as f64) * (gy as f64)).sqrt();
     let g = g / g_mag;
     let ax = a.0 as f64 * (1.0 - f) + b.0 as f64 * f;
     let ay = a.1 as f64 * (1.0 - f) + b.1 as f64 * f;
@@ -53,7 +62,7 @@ fn interp_point2(a: (i64, i64), b: (i64, i64), f: f64, g: f64) -> [(i64, i64); 2
 fn bjt_posts(x1: i64, y1: i64, x2: i64, y2: i64, flags: u32, pnp: i64) -> Vec<(i64, i64)> {
     let dx = x2 - x1;
     let dy = y2 - y1;
-    let dn = ((dx * dx + dy * dy) as f64).sqrt();
+    let dn = ((dx as f64) * (dx as f64) + (dy as f64) * (dy as f64)).sqrt();
     if dn < 1e-6 {
         return Vec::new();
     }
@@ -70,7 +79,7 @@ fn bjt_posts(x1: i64, y1: i64, x2: i64, y2: i64, flags: u32, pnp: i64) -> Vec<(i
 fn mosfet_posts(x1: i64, y1: i64, x2: i64, y2: i64, flags: u32) -> Vec<(i64, i64)> {
     let dx = x2 - x1;
     let dy = y2 - y1;
-    let dn = ((dx * dx + dy * dy) as f64).sqrt();
+    let dn = ((dx as f64) * (dx as f64) + (dy as f64) * (dy as f64)).sqrt();
     if dn < 1e-6 {
         return Vec::new();
     }
@@ -89,6 +98,9 @@ fn post_points(element: &CircuitElement) -> Result<Vec<(i64, i64)>, String> {
         .geometry
         .as_ref()
         .ok_or_else(|| "missing geometry".to_string())?;
+    if !coords_in_range(geometry) {
+        return Err(format!("coordinate outside ±{MAX_COORD}"));
+    }
     match element.kind.as_str() {
         "bjt" => {
             let pnp = if element.params.get("pnp").copied().unwrap_or(0.0) == 1.0 {
@@ -117,7 +129,12 @@ fn post_points(element: &CircuitElement) -> Result<Vec<(i64, i64)>, String> {
             Ok(posts)
         }
         "ground" => Ok(vec![(geometry.x1, geometry.y1)]),
-        _ => Ok(vec![(geometry.x1, geometry.y1), (geometry.x2, geometry.y2)]),
+        _ => {
+            if geometry.x1 == geometry.x2 && geometry.y1 == geometry.y2 {
+                return Err(format!("zero-length {}", element.kind));
+            }
+            Ok(vec![(geometry.x1, geometry.y1), (geometry.x2, geometry.y2)])
+        }
     }
 }
 

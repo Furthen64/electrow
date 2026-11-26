@@ -5,6 +5,7 @@ use crate::models;
 
 pub const DEFAULT_DT_S: f64 = 5e-6;
 const MAX_STEP_DIAGNOSTICS: usize = 16;
+const PIVOT_EPSILON: f64 = 1e-12;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Diagnostic {
@@ -283,6 +284,7 @@ pub struct Circuit {
     pub diagnostics: Vec<Diagnostic>,
     step_diagnostics: Vec<Diagnostic>,
     good_steps: u32,
+    started: bool,
 }
 
 fn find_root(parent: &HashMap<String, String>, node: &str) -> String {
@@ -297,20 +299,27 @@ fn find_root(parent: &HashMap<String, String>, node: &str) -> String {
 }
 
 fn lu_solve(matrix: &[Vec<f64>], rhs: &[f64]) -> Result<Vec<f64>, Diagnostic> {
-    let size = matrix.len();
+    lu_solve_owned(matrix.to_vec(), rhs.to_vec())
+}
+
+fn lu_solve_owned(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Result<Vec<f64>, Diagnostic> {
+    let size = a.len();
     if size == 0 {
         return Ok(Vec::new());
     }
-    if matrix.iter().flatten().any(|v| !v.is_finite())
-        || rhs.iter().any(|v| !v.is_finite())
-    {
+    if a.iter().flatten().any(|v| !v.is_finite()) || b.iter().any(|v| !v.is_finite()) {
         return Err(Diagnostic::InvalidValue {
             element_id: "matrix".to_string(),
             parameter: "value".to_string(),
         });
     }
-    let mut a = matrix.to_vec();
-    let mut b = rhs.to_vec();
+    let column_scale: Vec<f64> = (0..size)
+        .map(|col| {
+            a.iter()
+                .map(|row| row[col].abs())
+                .fold(0.0_f64, f64::max)
+        })
+        .collect();
     for k in 0..size {
         let mut pivot = k;
         for row in k + 1..size {
@@ -318,7 +327,7 @@ fn lu_solve(matrix: &[Vec<f64>], rhs: &[f64]) -> Result<Vec<f64>, Diagnostic> {
                 pivot = row;
             }
         }
-        if a[pivot][k].abs() < 1e-12 {
+        if a[pivot][k].abs() <= PIVOT_EPSILON * column_scale[k] {
             return Err(Diagnostic::SingularMatrix);
         }
         if pivot != k {
@@ -365,6 +374,7 @@ impl Circuit {
             diagnostics: Vec::new(),
             step_diagnostics: Vec::new(),
             good_steps: 0,
+            started: false,
         }
     }
 
@@ -541,6 +551,7 @@ impl Circuit {
         };
         element.params.insert(key.to_string(), value);
         element.validate()?;
+        self.refresh_diagnostics();
         Ok(())
     }
 
@@ -605,21 +616,22 @@ impl Circuit {
             .map(|e| e.id.clone())
             .collect();
 
+        self.refresh_diagnostics();
+    }
+
+    fn refresh_diagnostics(&mut self) {
         self.diagnostics.clear();
         for element in &self.elements {
             if let Err(diagnostic) = element.validate() {
                 self.diagnostics.push(diagnostic);
             }
         }
-        if ground.is_some()
-            && !self
-                .elements
-                .iter()
-                .any(|e| e.kind == "ground")
-                && !self.node_ids.iter().any(|node| node == "gnd")
+        if !self.node_ids.is_empty()
+            && !self.elements.iter().any(|e| e.kind == "ground")
+            && !self.node_ids.iter().any(|node| node == "gnd")
         {
             self.diagnostics.push(Diagnostic::NoGround {
-                node_id: ground.unwrap(),
+                node_id: self.node_ids[0].clone(),
             });
         }
 
@@ -652,11 +664,14 @@ impl Circuit {
         }
     }
 
+
     pub fn reset(&mut self) {
         self.state = State::default();
         self.time_s = 0.0;
         self.current_dt = DEFAULT_DT_S;
         self.good_steps = 0;
+        self.started = false;
+        self.step_diagnostics.clear();
         self.analyze();
     }
 
@@ -885,7 +900,7 @@ impl Circuit {
 
     fn commit(
         &mut self,
-        state: &mut State,
+        mut state: State,
         solution: &[f64],
         voltages: &[f64],
         assembly: &Assembly,
@@ -966,30 +981,32 @@ impl Circuit {
                 },
             }
         }
-        self.state = state.clone();
+        self.state = state;
         self.time_s += dt;
         Ok(())
     }
 
     fn attempt_step(&mut self, dt: f64) -> Result<(), Diagnostic> {
         let mut working = self.state.clone();
-        let nonlinear_ids: Vec<String> = self
+        let nonlinear_indices: Vec<usize> = self
             .elements
             .iter()
-            .filter(|e| matches!(e.kind.as_str(), "diode" | "bjt" | "mosfet"))
-            .map(|e| e.id.clone())
+            .enumerate()
+            .filter(|(_, e)| matches!(e.kind.as_str(), "diode" | "bjt" | "mosfet"))
+            .map(|(index, _)| index)
             .collect();
         let mut iterations = 0;
         loop {
-            let assembly = self.assemble(&working, dt)?;
-            let solution = lu_solve(&assembly.matrix.a, &assembly.matrix.b)?;
+            let mut assembly = self.assemble(&working, dt)?;
+            let solution = lu_solve_owned(
+                std::mem::take(&mut assembly.matrix.a),
+                std::mem::take(&mut assembly.matrix.b),
+            )?;
             let voltages = self.extract_voltages(&solution);
             let mut max_change = 0.0;
-            for id in &nonlinear_ids {
-                let element = match self.elements.iter().find(|e| &e.id == id) {
-                    Some(element) => element,
-                    None => continue,
-                };
+            for &index in &nonlinear_indices {
+                let element = &self.elements[index];
+                let id = &element.id;
                 match element.kind.as_str() {
                     "diode" => {
                         let a = self.node_index.get(&element.nodes[0]).copied().unwrap_or(0);
@@ -1069,8 +1086,8 @@ impl Circuit {
                 }
             }
             iterations += 1;
-            if nonlinear_ids.is_empty() || max_change <= self.settings.convergence_tolerance_v {
-                return self.commit(&mut working, &solution, &voltages, &assembly, dt);
+            if nonlinear_indices.is_empty() || max_change <= self.settings.convergence_tolerance_v {
+                return self.commit(working, &solution, &voltages, &assembly, dt);
             }
             if iterations >= self.settings.max_iterations {
                 return Err(Diagnostic::NonConvergence {
@@ -1092,9 +1109,17 @@ impl Circuit {
             });
             return outcome;
         }
-        self.current_dt = requested_dt
-            .min(self.settings.max_dt_s)
-            .max(self.settings.min_dt_s);
+        if !self.started {
+            self.current_dt = requested_dt
+                .min(self.settings.max_dt_s)
+                .max(self.settings.min_dt_s);
+            self.started = true;
+        } else {
+            self.current_dt = self
+                .current_dt
+                .min(self.settings.max_dt_s)
+                .max(self.settings.min_dt_s);
+        }
 
         for _ in 0..steps {
             let saved_state = self.state.clone();
@@ -1267,6 +1292,16 @@ mod tests {
     }
 
     #[test]
+    fn high_value_resistor_divider_is_not_singular() {
+        let mut circuit = divider();
+        param(&mut circuit, "r1", OHM, 1e11);
+        param(&mut circuit, "r2", OHM, 1e11);
+        let outcome = circuit.step(5e-6, 1);
+        assert!(!outcome.failed, "high-impedance divider must solve: {:?}", outcome.diagnostics);
+        assert!((voltage(&circuit, "n2") - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn rc_transient_matches_analytic_time_constant() {
         let mut circuit = rc();
         let outcome = circuit.step(5e-6, 200);
@@ -1332,6 +1367,24 @@ mod tests {
     }
 
     #[test]
+    fn parameter_edit_refreshes_diagnostics() {
+        let mut circuit = divider();
+        circuit
+            .elements
+            .iter_mut()
+            .find(|e| e.id == "r1")
+            .unwrap()
+            .params
+            .insert(OHM.to_string(), 0.0);
+        circuit.refresh_diagnostics();
+        assert!(circuit.diagnostics.iter().any(
+            |d| matches!(d, Diagnostic::InvalidValue { parameter, .. } if parameter == OHM)
+        ));
+        param(&mut circuit, "r1", OHM, 1000.0);
+        assert!(circuit.diagnostics.is_empty());
+    }
+
+    #[test]
     fn rejected_step_restores_previous_accepted_state() {
         let mut circuit = diode_circuit();
         circuit.settings.max_iterations = 1;
@@ -1344,6 +1397,24 @@ mod tests {
             .any(|d| matches!(d, Diagnostic::NonConvergence { .. })));
         assert_eq!(circuit.node_voltages(), before);
         assert_eq!(circuit.time_s(), 0.0);
+    }
+
+    #[test]
+    fn adaptive_dt_persists_across_step_calls() {
+        let mut batched = divider();
+        let mut separate = divider();
+        for circuit in [&mut batched, &mut separate] {
+            circuit.settings.max_dt_s = 1e-3;
+        }
+        batched.step(5e-6, 3);
+        for _ in 0..3 {
+            separate.step(5e-6, 1);
+        }
+        assert!((separate.current_dt() - batched.current_dt()).abs() < 1e-15);
+        assert!((separate.current_dt() - 1e-5).abs() < 1e-15);
+        separate.reset();
+        assert!(!separate.started);
+        assert_eq!(separate.current_dt(), DEFAULT_DT_S);
     }
 
     #[test]
@@ -1522,5 +1593,42 @@ mod tests {
             outcome,
             Err(Diagnostic::InvalidValue { parameter, .. }) if parameter == "kind"
         ));
+    }
+
+    #[test]
+    #[ignore = "benchmark harness; run with --ignored --nocapture"]
+    fn benchmark_divider_chain() {
+        let mut circuit = Circuit::new();
+        circuit
+            .apply_operations(vec![
+                op_add("ground", "ground", &["gnd"]),
+                op_add("v1", "voltage_source", &["n0", "gnd"]),
+            ])
+            .unwrap();
+        param(&mut circuit, "v1", VOLT, 10.0);
+        for i in 0..40 {
+            let id = format!("r{i}");
+            circuit
+                .apply_operations(vec![op_add(
+                    &id,
+                    "resistor",
+                    &[&format!("n{i}"), &format!("n{}", i + 1)],
+                )])
+                .unwrap();
+            param(&mut circuit, &id, OHM, 1000.0);
+        }
+        circuit
+            .apply_operations(vec![op_add("rlast", "resistor", &["n40", "gnd"])])
+            .unwrap();
+        param(&mut circuit, "rlast", OHM, 1000.0);
+
+        let started = std::time::Instant::now();
+        let outcome = circuit.step(5e-6, 1000);
+        println!(
+            "40-resistor chain, 1000 steps: {:?} (failed={})",
+            started.elapsed(),
+            outcome.failed
+        );
+        assert!(!outcome.failed);
     }
 }

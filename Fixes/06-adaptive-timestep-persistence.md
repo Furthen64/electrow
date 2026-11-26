@@ -1,6 +1,6 @@
 # Fix 06 — Preserve adaptive timestep across step calls
 
-Status: pending
+Status: complete (2026-11-26). Added `started` flag; `dt_s` now seeds `current_dt` only on the first step after create/reset, otherwise adaptation persists. `reset()` restores the default dt. Documented in `solver-algorithms.md` §6 and `interface-schema.json`. Added `adaptive_dt_persists_across_step_calls`; 79 tests pass.
 Severity: medium (performance / behavior)
 
 ## Problem

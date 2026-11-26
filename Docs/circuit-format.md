@@ -1,6 +1,6 @@
 # Circuit format and Falstad import (Task 05)
 
-Status: complete (2026-11-26). Delivered: `engine/src/circuit_doc/` (versioned Electrow circuit JSON, v1, with validation and stable serialization; module layout `types`/`parse`/`validate`/`serialize`), `engine/src/falstad/` (Falstad text import: `parser`/`elements`/`geometry`; three-terminal geometry ported exactly), `engine/src/xml_import.rs` (reference-format XML import, same model semantics), `engine/src/import_common.rs` (shared post-geometry/node-merging pipeline), `load_circuit` with `format: "electrow-json"` / `"falstad-text"` / `"text"` / `"xml"`, `export_circuit`, and a 70-test suite.
+Status: complete (2026-11-26). Delivered: `engine/src/circuit_doc/` (versioned Electrow circuit JSON, v1, with validation and stable serialization; module layout `types`/`parse`/`validate`/`serialize`), `engine/src/falstad/` (Falstad text import: `parser`/`elements`; three-terminal geometry ported exactly in `import_common`), `engine/src/xml_import.rs` (reference-format XML import, same model semantics), `engine/src/import_common.rs` (shared post-geometry/node-merging pipeline), `load_circuit` with `format: "electrow-json"` / `"falstad-text"` / `"text"` / `"xml"`, `export_circuit`, and a 91-test suite.
 
 ## Electrow circuit JSON (schema v1)
 

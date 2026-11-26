@@ -9,6 +9,19 @@ const els = {
 let nextId = 1;
 let lastRevision = 0;
 let lastSequence = -1;
+let pollTimer = null;
+
+function startPolling() {
+  if (pollTimer !== null) return;
+  pollTimer = setInterval(() => send("snapshot"), 50);
+}
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
 
 function renderSnapshot(snapshot) {
   els.snapshot.textContent =
@@ -33,6 +46,12 @@ async function send(cmd, args = {}) {
       const error = data.error || { code: "http", message: `HTTP ${result.status}` };
       els.response.textContent = `${error.code}: ${error.message}`;
       els.status.textContent = "error";
+      if (error.code === "session_lost") {
+        stopPolling();
+        lastRevision = 0;
+        lastSequence = -1;
+        send("create");
+      }
       return null;
     }
     const response = data.result;
@@ -83,10 +102,19 @@ bind("subscribe", "subscribe", () => ({
   signals: [{ id: "vout", element_id: "r1", quantity: "voltage", unit: "V" }],
 }));
 bind("unsubscribe", "unsubscribe", { stream_id: "scope-1" });
-bind("run", "run");
-bind("pause", "pause");
+document.getElementById("run").addEventListener("click", async () => {
+  const response = await send("run");
+  if (response) startPolling();
+});
+document.getElementById("pause").addEventListener("click", async () => {
+  stopPolling();
+  await send("pause");
+});
 bind("step", "step", { dt_s: 0.000005, steps: 100 });
-bind("reset", "reset");
+document.getElementById("reset").addEventListener("click", async () => {
+  stopPolling();
+  await send("reset");
+});
 bind("snapshot", "snapshot");
 
 async function health() {

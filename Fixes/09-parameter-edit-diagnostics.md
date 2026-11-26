@@ -1,6 +1,6 @@
 # Fix 09 — Refresh diagnostics after parameter edits
 
-Status: pending
+Status: complete (2026-11-26). Extracted `refresh_diagnostics()` from `analyze()` and call it after successful `set_parameter()`. Added `parameter_edit_refreshes_diagnostics`; 82 tests pass; smoke test OK.
 Severity: low-medium (stale diagnostics)
 
 ## Problem

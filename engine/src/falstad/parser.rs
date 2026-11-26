@@ -53,12 +53,6 @@ pub(crate) fn parse_options_line(
             format!("line {line}: bad maxTimeStep token {:?}", tokens[2]),
         )
     })?;
-    if !max_time_step_s.is_finite() || max_time_step_s <= 0.0 || max_time_step_s > 1.0 {
-        return Err(DocDiagnostic::err(
-            "invalid_options_line",
-            format!("line {line}: maxTimeStep must be in (0, 1]"),
-        ));
-    }
     // tokens[3] = speed (Falstad "iter count" style value), not stored.
     // tokens[4] = currentBar (UI scale), not stored.
     let mut options = CircuitOptions {
@@ -86,10 +80,10 @@ pub(crate) fn parse_options_line(
     } else {
         options.min_time_step_s = CircuitOptions::default().min_time_step_s;
     }
-    if !options.voltage_range.is_finite() || options.voltage_range <= 0.0 {
+    if let Err(diagnostic) = crate::circuit_doc::validate_circuit_options(&options) {
         return Err(DocDiagnostic::err(
             "invalid_options_line",
-            format!("line {line}: voltageRange must be positive"),
+            format!("line {line}: {}", diagnostic.message),
         ));
     }
     Ok(options)

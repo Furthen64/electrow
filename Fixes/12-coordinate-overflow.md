@@ -1,6 +1,6 @@
 # Fix 12 — Guard coordinate arithmetic overflow in post geometry
 
-Status: pending
+Status: complete (2026-11-26). Post geometry now squares in `f64`; coordinates beyond ±1e6 are reported as unsupported. Used `saturating_abs()` to avoid `i64::MIN` overflow. Added `out_of_range_coordinates_are_reported`; 85 tests pass.
 Severity: medium (panic / wrong posts on crafted input)
 
 ## Problem

@@ -1,6 +1,6 @@
 # Fix 18 — Make run/pause actually advance simulated time
 
-Status: pending
+Status: complete (2026-11-26). `EngineClient` now runs a daemon driver thread (16 ms tick, 4 steps of 5e-6 s per tick) while `running`; `web/app.js` polls snapshots every 50 ms and stops on pause/reset. Added `test_run_driver` to the smoke suite. Docs updated with the chosen cadence (architecture §1/§2). Smoke test OK.
 Severity: medium (documented feature is a no-op)
 
 ## Problem

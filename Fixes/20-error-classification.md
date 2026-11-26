@@ -1,6 +1,6 @@
 # Fix 20 — Correct backend error classification
 
-Status: pending
+Status: complete (2026-11-26). Added missing client error codes to `server.py`; every error response now uses the standard object envelope (`id`, `code`, `message`, `retryable`); `/api/snapshot` includes `id`. Smoke test confirms 400/403 mapping.
 Severity: low-medium (wrong HTTP status codes)
 
 ## Problem

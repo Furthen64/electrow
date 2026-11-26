@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .engine_client import PROTOCOL_VERSION, EngineClient, EngineError
+from .engine_client import PROTOCOL_VERSION, EngineClient, EngineError, SessionLostError
 
 WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
 MAX_BODY_BYTES = 1024 * 1024
@@ -17,6 +17,9 @@ CLIENT_ERROR_CODES = {
     "stale_revision",
     "unknown_element",
     "unknown_stream",
+    "bad_document",
+    "invalid_document",
+    "no_document",
 }
 engine = EngineClient()
 
@@ -33,6 +36,21 @@ class Handler(BaseHTTPRequestHandler):
     def _send_json(self, status, payload):
         self._send(status, json.dumps(payload), "application/json")
 
+    def _error(self, status, code, message, request_id="invalid", retryable=False):
+        self._send_json(
+            status,
+            {
+                "v": PROTOCOL_VERSION,
+                "id": request_id,
+                "ok": False,
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "retryable": retryable,
+                },
+            },
+        )
+
     def _host_allowed(self):
         host = self.headers.get("Host", "").strip()
         name = host[1:-1] if host.startswith("[") else host.split(":")[0]
@@ -45,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
         return parsed.scheme == "http" and parsed.hostname in ALLOWED_HOSTS
 
     def _reject_host(self):
-        self._send_json(403, {"v": PROTOCOL_VERSION, "error": "host not allowed"})
+        self._error(403, "host_not_allowed", "host not allowed")
         return False
 
     def do_GET(self):
@@ -56,8 +74,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             try:
                 result = engine.hello()
-            except (OSError, RuntimeError, ValueError) as exc:
-                self._send_json(503, {"v": PROTOCOL_VERSION, "error": str(exc)})
+            except (OSError, RuntimeError, ValueError, SessionLostError) as exc:
+                self._error(503, "engine_unavailable", str(exc))
                 return
             self._send_json(
                 200,
@@ -73,10 +91,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/snapshot":
             try:
                 result = engine.command("snapshot")
-            except (OSError, RuntimeError, ValueError) as exc:
-                self._send_json(503, {"v": PROTOCOL_VERSION, "error": str(exc)})
+            except (OSError, RuntimeError, ValueError, SessionLostError) as exc:
+                self._error(503, "engine_unavailable", str(exc))
                 return
-            self._send_json(200, {"v": PROTOCOL_VERSION, "result": result})
+            self._send_json(
+                200, {"v": PROTOCOL_VERSION, "id": "snapshot", "ok": True, "result": result}
+            )
             return
         self._static(path)
 
@@ -85,19 +105,19 @@ class Handler(BaseHTTPRequestHandler):
             self._reject_host()
             return
         if urlparse(self.path).path != "/api/command":
-            self._send_json(404, {"v": PROTOCOL_VERSION, "error": "not found"})
+            self._error(404, "not_found", "not found")
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
-            self._send_json(400, {"v": PROTOCOL_VERSION, "error": "invalid content length"})
+            self._error(400, "bad_request", "invalid content length")
             return
         if length <= 0 or length > MAX_BODY_BYTES:
-            self._send_json(413, {"v": PROTOCOL_VERSION, "error": "invalid request size"})
+            self._error(413, "invalid_request_size", "invalid request size")
             return
         body = self.rfile.read(length)
         if len(body) != length:
-            self._send_json(400, {"v": PROTOCOL_VERSION, "error": "truncated request"})
+            self._error(400, "bad_request", "truncated request")
             return
         try:
             request = json.loads(body)
@@ -115,33 +135,20 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(args, dict):
                 raise ValueError("args must be an object")
         except (ValueError, json.JSONDecodeError) as exc:
-            self._send_json(400, {"v": PROTOCOL_VERSION, "error": str(exc)})
+            self._error(400, "bad_request", str(exc))
             return
 
         try:
             result = engine.command(cmd, args, request_id=request_id)
+        except SessionLostError as exc:
+            self._error(503, "session_lost", str(exc), request_id, retryable=True)
+            return
         except EngineError as exc:
             status = 400 if exc.code in CLIENT_ERROR_CODES else 503
-            self._send_json(
-                status,
-                {
-                    "v": PROTOCOL_VERSION,
-                    "id": request_id,
-                    "ok": False,
-                    "error": {"code": exc.code, "message": str(exc)},
-                },
-            )
+            self._error(status, exc.code, str(exc), request_id, retryable=exc.retryable)
             return
         except (OSError, RuntimeError, ValueError) as exc:
-            self._send_json(
-                503,
-                {
-                    "v": PROTOCOL_VERSION,
-                    "id": request_id,
-                    "ok": False,
-                    "error": {"code": "engine_unavailable", "message": str(exc)},
-                },
-            )
+            self._error(503, "engine_unavailable", str(exc), request_id)
             return
         self._send_json(
             200, {"v": PROTOCOL_VERSION, "id": request_id, "ok": True, "result": result}
@@ -152,7 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             path = "/index.html"
         candidate = (WEB_ROOT / path.lstrip("/")).resolve()
         if not candidate.is_relative_to(WEB_ROOT.resolve()) or not candidate.is_file():
-            self._send_json(404, {"v": PROTOCOL_VERSION, "error": "not found"})
+            self._error(404, "not_found", "not found")
             return
         content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
         self._send(200, candidate.read_bytes(), content_type)
@@ -165,6 +172,7 @@ def main():
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server.daemon_threads = True
     print(f"Electrow UI at http://{args.host}:{args.port}/")
     try:
         server.serve_forever()

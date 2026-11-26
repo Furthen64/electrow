@@ -53,7 +53,12 @@ fn main() {
 
         let shutdown = request.get("cmd").and_then(Value::as_str) == Some("shutdown");
         let response = engine.handle(&request);
-        if writeln!(stdout, "{}", response.to_json()).is_err() {
+        let text = if response.has_non_finite() {
+            parse_error("engine produced a non-finite value")
+        } else {
+            response.to_json()
+        };
+        if writeln!(stdout, "{}", text).is_err() {
             break;
         }
         if stdout.flush().is_err() {

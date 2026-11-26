@@ -47,6 +47,15 @@ impl Value {
         }
     }
 
+    pub fn has_non_finite(&self) -> bool {
+        match self {
+            Value::Number(number) => !number.is_finite(),
+            Value::Array(items) => items.iter().any(Value::has_non_finite),
+            Value::Object(entries) => entries.iter().any(|(_, value)| value.has_non_finite()),
+            _ => false,
+        }
+    }
+
     pub fn to_json(&self) -> String {
         let mut out = String::new();
         write_value(self, &mut out);
@@ -166,10 +175,26 @@ impl<'a> Parser<'a> {
                         b't' => out.push('\t'),
                         b'u' => {
                             let code = self.hex4()?;
-                            let ch = if (0xd800..=0xdfff).contains(&code) {
-                                '\u{fffd}'
-                            } else {
-                                char::from_u32(code).unwrap_or('\u{fffd}')
+                            let ch = match code {
+                                0xd800..=0xdbff => {
+                                    if self.bytes.get(self.pos) != Some(&b'\\')
+                                        || self.bytes.get(self.pos + 1) != Some(&b'u')
+                                    {
+                                        return Err(format!("unpaired high surrogate at {}", self.pos));
+                                    }
+                                    self.pos += 2;
+                                    let low = self.hex4()?;
+                                    if !(0xdc00..=0xdfff).contains(&low) {
+                                        return Err(format!("invalid low surrogate at {}", self.pos));
+                                    }
+                                    let combined =
+                                        0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
+                                    char::from_u32(combined).ok_or("invalid surrogate pair")?
+                                }
+                                0xdc00..=0xdfff => {
+                                    return Err(format!("unpaired low surrogate at {}", self.pos));
+                                }
+                                _ => char::from_u32(code).unwrap_or('\u{fffd}'),
                             };
                             out.push(ch);
                         }
@@ -332,6 +357,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn detects_non_finite_values() {
+        assert!(Value::Number(f64::NAN).has_non_finite());
+        assert!(Value::Array(vec![Value::Number(f64::INFINITY)]).has_non_finite());
+        assert!(Value::Object(vec![(
+            "a".to_string(),
+            Value::Number(f64::NEG_INFINITY)
+        )])
+        .has_non_finite());
+        assert!(!Value::Object(vec![("a".to_string(), Value::Number(1.0))]).has_non_finite());
+    }
+
+    #[test]
     fn round_trip_nested_value() {
         let input = r#"{"v":1,"id":"a","args":{"text":"line\nquote\"","n":5e-6,"list":[true,null,-2]}}"#;
         let value = parse(input).unwrap();
@@ -347,6 +384,14 @@ mod tests {
     #[test]
     fn rejects_trailing_data() {
         assert!(parse("{} {}").is_err());
+    }
+
+    #[test]
+    fn combines_surrogate_pairs_and_rejects_lone_surrogates() {
+        let value = parse(r#"{"s":"\uD83D\uDE00"}"#).unwrap();
+        assert_eq!(value.get("s"), Some(&Value::String("😀".to_string())));
+        assert!(parse(r#""\uD83D""#).is_err());
+        assert!(parse(r#""\uDE00""#).is_err());
     }
 
     #[test]

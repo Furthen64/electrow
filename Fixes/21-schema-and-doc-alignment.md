@@ -1,6 +1,6 @@
 # Fix 21 — Align interface schema and docs with implementation
 
-Status: pending
+Status: complete (2026-11-26). Schema now covers all four load formats, `export_circuit`, emitted error codes and the real status enum; stale claims in `architecture.md`, `solver-algorithms.md`, `circuit-format.md` and `falstad/mod.rs` corrected. Error envelopes deliberately omit `revision` (documented) because errors can precede circuit creation.
 Severity: low (contract drift)
 
 ## Problem

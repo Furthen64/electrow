@@ -1,6 +1,6 @@
 # Fix 14 — Report zero-length two-terminal elements as unsupported
 
-Status: pending
+Status: complete (2026-11-26). `post_points()` now rejects coincident endpoints for all two-terminal kinds as a `GeometryFailure`; ground's single post is unaffected. Added text and XML regression tests; 88 tests pass.
 Severity: low-medium (silent electrical short)
 
 ## Problem

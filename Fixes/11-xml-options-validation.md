@@ -1,6 +1,6 @@
 # Fix 11 — Validate XML import options consistently
 
-Status: pending
+Status: complete (2026-11-26). XML importer now uses the same shared option validator; absent `vr` uses the default instead of 0. Added `xml_rejects_non_finite_and_inverted_options`; 84 tests pass.
 Severity: medium (invalid simulation settings)
 
 ## Problem

@@ -12,6 +12,7 @@ mod validate;
 
 pub use parse::parse_document;
 pub use serialize::document_to_json;
+pub use validate::validate_circuit_options;
 pub use types::{
     CircuitDocument, CircuitElement, CircuitOptions, DocDiagnostic, Geometry, UnsupportedRecord,
     CIRCUIT_DOC_FORMAT, CIRCUIT_DOC_VERSION, MAX_DOCUMENT_BYTES, MAX_ELEMENTS, MAX_ID_LEN,
@@ -101,6 +102,25 @@ mod tests {
         assert!(codes.contains(&"invalid_param"));
         assert!(codes.contains(&"unknown_param"));
         assert!(codes.contains(&"duplicate_id"));
+    }
+
+    #[test]
+    fn rejects_wrong_typed_fields() {
+        let err = parse_document(
+            r#"{
+                "format": "electrow-circuit", "version": 1, "circuit_id": "x",
+                "options": {"max_time_step_s": "abc", "flags": -1, "adjust_time_step": 1},
+                "elements": [
+                    {"id":"r1","kind":"resistor","nodes":["a","b"],"params":5,
+                     "geometry":"bad"}
+                ]
+            }"#,
+        )
+        .unwrap_err();
+        let codes: Vec<_> = err.iter().map(|d| d.code).collect();
+        assert!(codes.contains(&"invalid_options"));
+        assert!(codes.contains(&"invalid_params"));
+        assert!(codes.contains(&"invalid_geometry"));
     }
 
     #[test]

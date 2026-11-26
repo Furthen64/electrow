@@ -12,9 +12,8 @@
 //! for two-terminal elements (posts are the two endpoints). Unsupported or
 //! malformed lines are collected as `UnsupportedRecord` diagnostics; they
 //! never silently substitute a different model. Three-terminal elements
-//! (BJT/MOSFET) are reported as unsupported: the text dump only stores two
-//! endpoints, and reproducing Falstad's post geometry requires a geometry
-//! port that is out of scope here.
+//! (BJT/MOSFET) are supported: their posts are reconstructed from the two
+//! stored endpoints plus the element flags (see `import_common`).
 
 mod elements;
 mod parser;
@@ -213,6 +212,21 @@ r 100 100 100 200 0 1000
     }
 
     #[test]
+    fn rejects_invalid_timestep_and_range_options() {
+        for header in [
+            "$ 1 5.0E-6 10 63 10.0 62 NaN",
+            "$ 1 5.0E-6 10 63 10.0 62 1e-3",
+            "$ 1 5.0E-6 10 63 inf",
+            "$ 1 NaN 10 63 10.0",
+            "$ 1 0 10 63 10.0",
+        ] {
+            let text = format!("{header}\nr 0 0 1 1 0 1000\n");
+            let err = parse_falstad_text(&text).expect_err("invalid options must be rejected");
+            assert_eq!(err.code, "invalid_options_line");
+        }
+    }
+
+    #[test]
     fn switch_position_mapping() {
         let text = "\
 $ 0 5.0E-6 10 0 5.0
@@ -330,6 +344,24 @@ l 100 100 100 200 0 1.0e-3 0.0 0.0 0.0
         assert_eq!(import.document.elements.len(), 1);
         assert_eq!(import.document.elements[0].params.get("inductance_h"), Some(&0.001));
         assert!(!import.warnings.is_empty());
+    }
+
+    #[test]
+    fn zero_length_two_terminal_elements_are_reported() {
+        let text = "$ 0 5.0E-6 10 0 5.0\nr 100 100 100 100 0 1000\n";
+        let import = parse_falstad_text(text).expect("zero-length element must not be imported");
+        assert!(import.document.elements.is_empty());
+        assert_eq!(import.unsupported.len(), 1);
+        assert!(import.unsupported[0].reason.contains("zero-length"));
+    }
+
+    #[test]
+    fn out_of_range_coordinates_are_reported() {
+        let text = "$ 0 5.0E-6 10 0 5.0\nt 0 0 10000000000 0 0 1 0.5 0.5 100 default\n";
+        let import = parse_falstad_text(text).expect("out-of-range geometry must not panic");
+        assert!(import.document.elements.is_empty());
+        assert_eq!(import.unsupported.len(), 1);
+        assert!(import.unsupported[0].reason.contains("coordinate"));
     }
 
     #[test]
