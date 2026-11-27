@@ -4,7 +4,10 @@ import mimetypes
 import os
 import re
 import sys
+import threading
 import webbrowser
+from collections import deque
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -16,6 +19,7 @@ WEB_ROOT = REPO_ROOT / "web"
 CIRCUITS_ROOT = Path(os.environ.get("ELECTROW_CIRCUITS_DIR", REPO_ROOT / "circuits")).resolve()
 MAX_BODY_BYTES = 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024
+LOG_LIMIT = 500
 CIRCUIT_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1"}
 allow_lan = False
@@ -31,6 +35,24 @@ CLIENT_ERROR_CODES = {
     "no_document",
 }
 engine = EngineClient()
+log_entries = deque(maxlen=LOG_LIMIT)
+log_lock = threading.Lock()
+
+
+def debug_log(level, message):
+    entry = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "level": level,
+        "message": str(message)[:1000],
+    }
+    with log_lock:
+        log_entries.append(entry)
+    return entry
+
+
+def recent_logs():
+    with log_lock:
+        return list(log_entries)
 
 
 def circuit_path(name):
@@ -41,6 +63,13 @@ def circuit_path(name):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        message = format % args
+        noisy = ("POST /api/command", "GET /api/snapshot", "GET /api/logs")
+        if not any(item in message for item in noisy):
+            debug_log("info", message.strip())
+        super().log_message(format, *args)
+
     def _send(self, status, body, content_type):
         payload = body.encode("utf-8") if isinstance(body, str) else body
         self.send_response(status)
@@ -53,6 +82,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(payload), "application/json")
 
     def _error(self, status, code, message, request_id="invalid", retryable=False):
+        level = "error" if status >= 500 else "warn"
+        debug_log(level, f"{status} {code}: {message}")
         self._send_json(
             status,
             {
@@ -69,15 +100,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def _call_engine(self, cmd, args, request_id):
         try:
-            return engine.command(cmd, args, request_id=request_id)
+            result = engine.command(cmd, args, request_id=request_id)
         except SessionLostError as exc:
             self._error(503, "session_lost", str(exc), request_id, retryable=True)
+            return None
         except EngineError as exc:
             status = 400 if exc.code in CLIENT_ERROR_CODES else 503
             self._error(status, exc.code, str(exc), request_id, retryable=exc.retryable)
+            return None
         except (OSError, RuntimeError, ValueError) as exc:
             self._error(503, "engine_unavailable", str(exc), request_id)
-        return None
+            return None
+        if cmd not in ("snapshot", "hello"):
+            debug_log("debug", f"engine {cmd} ok ({request_id})")
+        return result
 
     def _host_allowed(self):
         if allow_lan:
@@ -123,6 +159,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(
                 200, {"v": PROTOCOL_VERSION, "id": "snapshot", "ok": True, "result": result}
             )
+            return
+        if path == "/api/logs":
+            self._send_json(200, {"v": PROTOCOL_VERSION, "entries": recent_logs()})
             return
         if path == "/api/circuits":
             try:
@@ -231,6 +270,8 @@ class Handler(BaseHTTPRequestHandler):
     def _static(self, path):
         if path in ("", "/"):
             path = "/index.html"
+        elif path == "/admin":
+            path = "/admin.html"
         candidate = (WEB_ROOT / path.lstrip("/")).resolve()
         if not candidate.is_relative_to(WEB_ROOT.resolve()) or not candidate.is_file():
             self._error(404, "not_found", "not found")
@@ -258,21 +299,26 @@ def main():
 
     allow_lan = args.allow_lan or args.host not in ALLOWED_HOSTS
     if allow_lan:
-        print("LAN mode: Host/Origin checks disabled (development only)", flush=True)
+        message = "LAN mode: Host/Origin checks disabled (development only)"
+        print(message, flush=True)
+        debug_log("warn", message)
     try:
         server = ThreadingHTTPServer((args.host, args.port), Handler)
     except OSError as exc:
-        print(f"cannot bind {args.host}:{args.port}: {exc}", file=sys.stderr, flush=True)
+        message = f"cannot bind {args.host}:{args.port}: {exc}"
+        print(message, file=sys.stderr, flush=True)
+        debug_log("error", message)
         raise SystemExit(2)
     server.daemon_threads = True
     if args.host in ("0.0.0.0", "::"):
-        print(
-            f"Electrow UI at http://<host-ip>:{args.port}/ (or http://127.0.0.1:{args.port}/ locally)",
-            flush=True,
-        )
+        message = f"Electrow UI at http://<host-ip>:{args.port}/ (or http://127.0.0.1:{args.port}/ locally)"
+        print(message, flush=True)
+        debug_log("info", message)
         open_host = "127.0.0.1"
     else:
-        print(f"Electrow UI at http://{args.host}:{args.port}/", flush=True)
+        message = f"Electrow UI at http://{args.host}:{args.port}/"
+        print(message, flush=True)
+        debug_log("info", message)
         open_host = args.host
     if args.open:
         webbrowser.open(f"http://{open_host}:{args.port}/")
@@ -283,6 +329,7 @@ def main():
     finally:
         server.server_close()
         engine.stop()
+        debug_log("info", "backend stopped")
 
 
 if __name__ == "__main__":

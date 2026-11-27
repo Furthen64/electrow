@@ -20,6 +20,96 @@
       </div>
     </header>
 
+    <nav id="menubar" class="menubar" aria-label="Application menu">
+      <div class="menu">
+        <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-file">File</button>
+        <div id="menu-file" class="menu-popover" role="menu" hidden>
+          <button type="button" role="menuitem" data-menu-action="new">New circuit <kbd>Ctrl+N</kbd></button>
+          <button type="button" role="menuitem" data-menu-action="open">Open circuit… <kbd>Ctrl+O</kbd></button>
+          <button type="button" role="menuitem" data-menu-action="save">Save circuit <kbd>Ctrl+S</kbd></button>
+          <hr>
+          <button type="button" role="menuitem" data-menu-action="focus-import">Import dump…</button>
+          <button type="button" role="menuitem" data-menu-action="export">Export JSON</button>
+          <hr>
+          <button type="button" role="menuitem" data-menu-action="health">Check connection</button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-edit">Edit</button>
+        <div id="menu-edit" class="menu-popover" role="menu" hidden>
+          <button type="button" role="menuitem" data-menu-action="undo">Undo <kbd>Ctrl+Z</kbd></button>
+          <button type="button" role="menuitem" data-menu-action="redo">Redo <kbd>Ctrl+Y</kbd></button>
+          <button type="button" role="menuitem" data-menu-action="delete">Delete selection <kbd>Del</kbd></button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-view">View</button>
+        <div id="menu-view" class="menu-popover" role="menu" hidden>
+          <button type="button" role="menuitem" data-menu-action="tool:select">Select tool</button>
+          <button type="button" role="menuitem" data-menu-action="tool:wire">Wire tool</button>
+          <button type="button" role="menuitem" data-menu-action="tool:pan">Pan tool</button>
+          <hr>
+          <button type="button" role="menuitem" data-menu-action="fit">Reset view</button>
+          <button type="button" role="menuitem" data-menu-action="focus-schematic">Focus schematic</button>
+          <button type="button" role="menuitem" data-menu-action="focus-scope">Focus oscilloscope</button>
+          <button type="button" role="menuitem" data-menu-action="toggle-export">Toggle export output</button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-components">Components</button>
+        <div id="menu-components" class="menu-popover" role="menu" hidden>
+          <button type="button" role="menuitem" data-menu-action="focus-build">Add element…</button>
+          <button type="button" role="menuitem" data-menu-action="focus-param">Set parameter…</button>
+          <button type="button" role="menuitem" data-menu-action="focus-preset">Transistor preset…</button>
+          <hr>
+          <button type="button" role="menuitem" data-menu-action="place:resistor">Resistor</button>
+          <button type="button" role="menuitem" data-menu-action="place:capacitor">Capacitor</button>
+          <button type="button" role="menuitem" data-menu-action="place:inductor">Inductor</button>
+          <button type="button" role="menuitem" data-menu-action="place:diode">Diode</button>
+          <button type="button" role="menuitem" data-menu-action="place:switch">Switch</button>
+          <button type="button" role="menuitem" data-menu-action="place:wire">Wire</button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-sources">Sources</button>
+        <div id="menu-sources" class="menu-popover" role="menu" hidden>
+          <button type="button" role="menuitem" data-menu-action="place:voltage_source">Voltage source</button>
+          <button type="button" role="menuitem" data-menu-action="place:current_source">Current source</button>
+          <button type="button" role="menuitem" data-menu-action="place:ground">Ground</button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-circuits">Circuits</button>
+        <div id="menu-circuits" class="menu-popover" role="menu" hidden>
+          <button type="button" role="menuitem" data-menu-action="demo">Divider demo</button>
+          <button type="button" role="menuitem" data-menu-action="new">New empty circuit</button>
+          <hr>
+          <button type="button" role="menuitem" data-menu-action="focus-import">Load dump…</button>
+          <button type="button" role="menuitem" data-menu-action="export">Export JSON</button>
+          <button type="button" role="menuitem" data-menu-action="refresh-files">Refresh file list</button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-simulation">Simulation</button>
+        <div id="menu-simulation" class="menu-popover" role="menu" hidden>
+          <button type="button" role="menuitem" data-menu-action="run">Run</button>
+          <button type="button" role="menuitem" data-menu-action="pause">Pause</button>
+          <button type="button" role="menuitem" data-menu-action="step">Step</button>
+          <button type="button" role="menuitem" data-menu-action="reset">Reset</button>
+          <hr>
+          <button type="button" role="menuitem" data-menu-action="snapshot">Refresh snapshot</button>
+        </div>
+      </div>
+      <div class="menu">
+        <button class="menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-help">Help</button>
+        <div id="menu-help" class="menu-popover" role="menu" hidden>
+          <button type="button" role="menuitem" data-menu-action="shortcuts">Keyboard shortcuts</button>
+          <button type="button" role="menuitem" data-menu-action="admin">Backend log</button>
+          <button type="button" role="menuitem" data-menu-action="about">About Electrow</button>
+        </div>
+      </div>
+    </nav>
+
     <main class="grid">
       <section class="panel panel-primary">
         <h2>Quick start</h2>
@@ -45,7 +135,7 @@
           <button id="btn-fit">Reset view</button>
         </div>
         <div id="palette" class="palette"></div>
-        <canvas id="schematic" class="schematic-canvas"></canvas>
+        <canvas id="schematic" class="schematic-canvas" tabindex="0"></canvas>
         <p id="editor-status" class="hint">Pick a component, click the canvas to place it. Drag to move, scroll to zoom, space-drag to pan.</p>
       </section>
 
@@ -149,7 +239,7 @@
       <section class="panel">
         <h2>Oscilloscope</h2>
         <p class="hint">Bounded 4096-sample traces for subscribed signals, plotted against simulated time.</p>
-        <canvas id="scope" class="scope-canvas"></canvas>
+        <canvas id="scope" class="scope-canvas" tabindex="0"></canvas>
       </section>
 
       <section class="panel">

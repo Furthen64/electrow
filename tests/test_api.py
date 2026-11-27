@@ -123,6 +123,19 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(snapshot["result"]["revision"], revision)
 
+    def test_admin_log_endpoint(self):
+        http_json(self.base, "/api/command", {
+            "v": 1, "id": "log-check", "cmd": "create", "args": {},
+        })
+        status, logs = http_json(self.base, "/api/logs")
+        self.assertEqual(status, 200)
+        self.assertIn("entries", logs)
+        messages = [entry["message"] for entry in logs["entries"]]
+        self.assertTrue(any("engine create ok" in message for message in messages))
+        with urllib.request.urlopen(self.base + "/admin", timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"Backend log", response.read())
+
     def test_client_errors_and_host_check(self):
         http_json(self.base, "/api/command", {
             "v": 1, "id": "setup", "cmd": "create", "args": {},

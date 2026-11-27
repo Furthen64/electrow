@@ -139,6 +139,91 @@ function bind(id, handler) {
   document.getElementById(id)?.addEventListener("click", handler);
 }
 
+function focusField(id) {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.scrollIntoView({ block: "center" });
+  element.focus({ preventScroll: true });
+}
+
+function bindMenus() {
+  const menubar = document.getElementById("menubar");
+  const triggers = [...menubar.querySelectorAll(".menu-trigger")];
+  const popover = (trigger) => document.getElementById(trigger.getAttribute("aria-controls"));
+
+  function closeMenus() {
+    for (const trigger of triggers) {
+      trigger.setAttribute("aria-expanded", "false");
+      popover(trigger).hidden = true;
+    }
+  }
+
+  function openMenu(trigger) {
+    closeMenus();
+    trigger.setAttribute("aria-expanded", "true");
+    popover(trigger).hidden = false;
+  }
+
+  for (const trigger of triggers) {
+    trigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (popover(trigger).hidden) openMenu(trigger);
+      else closeMenus();
+    });
+    trigger.addEventListener("mouseenter", () => {
+      if (triggers.some((item) => item.getAttribute("aria-expanded") === "true")) openMenu(trigger);
+    });
+  }
+
+  const actions = {
+    "new": () => newCircuit(),
+    "open": () => loadFile(),
+    "save": () => saveFile(),
+    "focus-import": () => focusField("dump-input"),
+    "export": () => document.getElementById("btn-export").click(),
+    "health": () => document.getElementById("btn-hello").click(),
+    "undo": () => editor.undo(),
+    "redo": () => editor.redo(),
+    "delete": () => editor.deleteSelected(),
+    "fit": () => document.getElementById("btn-fit").click(),
+    "focus-schematic": () => focusField("schematic"),
+    "focus-scope": () => focusField("scope"),
+    "toggle-export": () => {
+      els.exportOutput.hidden = !els.exportOutput.hidden;
+    },
+    "focus-build": () => focusField("build-kind"),
+    "focus-param": () => focusField("param-id"),
+    "focus-preset": () => focusField("transistor-preset"),
+    "demo": () => document.getElementById("btn-divider").click(),
+    "refresh-files": () => document.getElementById("btn-refresh-files").click(),
+    "run": () => document.getElementById("btn-run").click(),
+    "pause": () => document.getElementById("btn-pause").click(),
+    "step": () => document.getElementById("btn-step").click(),
+    "reset": () => document.getElementById("btn-reset").click(),
+    "snapshot": () => document.getElementById("btn-snapshot").click(),
+    "shortcuts": () => editor.status("Shortcuts: Ctrl+N/O/S, Ctrl+Z/Y, Delete, Esc, Space-drag to pan"),
+    "admin": () => { window.location.href = "/admin"; },
+    "about": () => editor.status("Electrow — local circuit simulator backed by the Rust engine"),
+  };
+
+  menubar.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-menu-action]");
+    if (!item) return;
+    closeMenus();
+    const action = item.dataset.menuAction;
+    if (action.startsWith("place:")) editor.place(action.slice("place:".length));
+    else if (action.startsWith("tool:")) editor.setTool(action.slice("tool:".length));
+    else actions[action]?.();
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!menubar.contains(event.target)) closeMenus();
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeMenus();
+  });
+}
+
 async function buildDividerDemo() {
   await editor.newCircuit();
   const ground = documentModel.add("ground", 220, 300, 220, 300);
@@ -321,5 +406,6 @@ async function health() {
   }
 }
 
-health();
 document.getElementById("btn-refresh-files").click();
+bindMenus();
+health();

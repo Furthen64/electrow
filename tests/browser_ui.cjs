@@ -111,6 +111,16 @@ async function main() {
 
   const palette = await evaluate("document.getElementById('palette').children.length");
   results.push(report("palette renders components", palette === 9, `${palette} buttons`));
+  const menuLabels = await evaluate(`[...document.querySelectorAll('#menubar .menu-trigger')].map(button => button.textContent.trim())`);
+  const expectedMenus = ["File", "Edit", "View", "Components", "Sources", "Circuits", "Simulation", "Help"];
+  results.push(report(
+    "menu bar renders Falstad-style menus",
+    expectedMenus.every((label) => menuLabels.includes(label)),
+    menuLabels.join(" | ")
+  ));
+  const adminPage = await evaluate(`fetch('/admin').then(response => response.ok)`);
+  const adminEntries = await evaluate(`fetch('/api/logs').then(response => response.json()).then(data => data.entries.length)`);
+  results.push(report("admin page and log endpoint respond", adminPage && adminEntries > 0, `${adminEntries} log entries`));
 
   await click("btn-divider");
   await wait(700);
@@ -218,6 +228,22 @@ async function main() {
   const importResponse = await text("response");
   const imported = await exportCount();
   results.push(report("Falstad dump imports", imported === 3 && !importResponse.includes("invalid"), `${imported} elements`));
+
+  const beforeMenu = await exportCount();
+  await evaluate(`(() => {
+    const trigger = [...document.querySelectorAll('#menubar .menu-trigger')].find(button => button.textContent.trim() === 'Components');
+    trigger.click();
+    const item = [...document.querySelectorAll('#menu-components [data-menu-action]')].find(button => button.dataset.menuAction === 'place:resistor');
+    item.click();
+  })()`);
+  await wait(450);
+  const afterMenu = await exportCount();
+  const menuClosed = await evaluate("document.getElementById('menu-components').hidden === true");
+  results.push(report(
+    "Components menu places a component",
+    afterMenu === beforeMenu + 1 && menuClosed,
+    `${beforeMenu} -> ${afterMenu}`
+  ));
 
   ws.close();
   const failed = results.filter((result) => !result).length;

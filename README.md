@@ -17,7 +17,7 @@ python tests/smoke.py
 python -m backend --host 127.0.0.1 --port 8000 --open
 ```
 
-`--open` launches the default browser at the loopback URL; omit it to start headlessly. Open `http://127.0.0.1:8000/` (use `http://`, not `https://`; Firefox's HTTPS-Only mode can cause a TLS error against this plaintext port). Press **Create**, add components, subscribe, then **Run** (the backend steps the engine every 16 ms while running and the page polls snapshots every 50 ms). **Save file** / **Load file** write and read circuit JSON in `circuits/`; names are restricted to letters, digits, `_` and `-`. Set `ELECTROW_ENGINE` to override the worker path and `ELECTROW_CIRCUITS_DIR` to relocate the circuit folder.
+`--open` launches the default browser at the loopback URL; omit it to start headlessly. Open `http://127.0.0.1:8000/` (use `http://`, not `https://`; Firefox's HTTPS-Only mode can cause a TLS error against this plaintext port). The live backend log is at `http://127.0.0.1:8000/admin/` (also under **Help → Backend log**). Press **Create**, add components, subscribe, then **Run** (the backend steps the engine every 16 ms while running and the page polls snapshots every 50 ms). **Save file** / **Load file** write and read circuit JSON in `circuits/`; names are restricted to letters, digits, `_` and `-`. Set `ELECTROW_ENGINE` to override the worker path and `ELECTROW_CIRCUITS_DIR` to relocate the circuit folder.
 
 For LAN access during development, bind a non-loopback address; Host/Origin checks are then relaxed automatically, or pass `--allow-lan` explicitly:
 
