@@ -3,8 +3,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-address='127.0.0.1'
-port=8000
+address='0.0.0.0'
+port=8090
 no_build=0
 
 while [ $# -gt 0 ]; do
@@ -20,6 +20,12 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+lan_flag=()
+case "$address" in
+    127.0.0.1|localhost|::1) ;;
+    *) lan_flag=(--allow-lan) ;;
+esac
+
 if [ "$no_build" -eq 0 ]; then
     "$root/build.sh"
 fi
@@ -33,4 +39,4 @@ else
     echo 'python3/python not found' >&2; exit 1
 fi
 
-"$py" -m backend --host "$address" --port "$port"
+"$py" -m backend --host "$address" --port "$port" "${lan_flag[@]}"

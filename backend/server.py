@@ -16,6 +16,7 @@ MAX_BODY_BYTES = 1024 * 1024
 MAX_FILE_BYTES = 1024 * 1024
 CIRCUIT_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1"}
+allow_lan = False
 CLIENT_ERROR_CODES = {
     "unsupported_version",
     "bad_request",
@@ -77,6 +78,8 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def _host_allowed(self):
+        if allow_lan:
+            return True
         host = self.headers.get("Host", "").strip()
         name = host[1:-1] if host.startswith("[") else host.split(":")[0]
         if name not in ALLOWED_HOSTS:
@@ -235,14 +238,29 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global allow_lan
     parser = argparse.ArgumentParser(description="Electrow local backend")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--allow-lan",
+        action="store_true",
+        help="accept any Host/Origin (development only)",
+    )
     args = parser.parse_args()
 
+    allow_lan = args.allow_lan or args.host not in ALLOWED_HOSTS
+    if allow_lan:
+        print("LAN mode: Host/Origin checks disabled (development only)", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     server.daemon_threads = True
-    print(f"Electrow UI at http://{args.host}:{args.port}/")
+    if args.host in ("0.0.0.0", "::"):
+        print(
+            f"Electrow UI at http://<host-ip>:{args.port}/ (or http://127.0.0.1:{args.port}/ locally)",
+            flush=True,
+        )
+    else:
+        print(f"Electrow UI at http://{args.host}:{args.port}/", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

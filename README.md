@@ -4,7 +4,7 @@ Electrow is a planned open-source circuit simulator with a web-based interface, 
 
 ## Project status
 
-Tasks 01–06 and the browser schematic editor (Task 07) are complete. The remaining validation, performance, fork-feature and release tasks are still pending.
+Tasks 01–10 are complete. Task 11 (release readiness) remains.
 
 ## Run locally
 
@@ -17,7 +17,16 @@ python tests/smoke.py
 python -m backend --host 127.0.0.1 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/`. Press **Create**, add components, subscribe, then **Run** (the backend steps the engine every 16 ms while running and the page polls snapshots every 50 ms). **Save file** / **Load file** write and read circuit JSON in `circuits/`; names are restricted to letters, digits, `_` and `-`. Set `ELECTROW_ENGINE` to override the worker path and `ELECTROW_CIRCUITS_DIR` to relocate the circuit folder.
+Open `http://127.0.0.1:8000/` (use `http://`, not `https://`; Firefox's HTTPS-Only mode can cause a TLS error against this plaintext port). Press **Create**, add components, subscribe, then **Run** (the backend steps the engine every 16 ms while running and the page polls snapshots every 50 ms). **Save file** / **Load file** write and read circuit JSON in `circuits/`; names are restricted to letters, digits, `_` and `-`. Set `ELECTROW_ENGINE` to override the worker path and `ELECTROW_CIRCUITS_DIR` to relocate the circuit folder.
+
+For LAN access during development, bind a non-loopback address; Host/Origin checks are then relaxed automatically, or pass `--allow-lan` explicitly:
+
+```sh
+./launch.sh --address 0.0.0.0 --port 8090
+# or: python -m backend --host 0.0.0.0 --port 8090 --allow-lan
+```
+
+Open `http://<host-ip>:8090/` from the client. The default `python -m backend` invocation stays loopback-only. LAN mode prints a warning and is intended for trusted networks; host/origin hardening can be added later as an optional release feature.
 
 Python talks to the Rust worker over a versioned newline-delimited JSON protocol; the worker owns all simulation state. Measured boundary overhead with `python tests/boundary_bench.py` on the development machine: `snapshot` mean 0.104 ms (p95 0.219 ms), single `step` mean 0.092 ms (p95 0.158 ms) over hundreds of round trips. See [Docs/architecture.md](Docs/architecture.md) and [Docs/interface-schema.json](Docs/interface-schema.json).
 

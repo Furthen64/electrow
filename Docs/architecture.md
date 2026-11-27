@@ -9,7 +9,7 @@ This document freezes the boundaries, transport and data contracts for the first
 | Decision | Choice | Alternative rejected |
 |---|---|---|
 | Rust/Python boundary | Persistent Rust worker process with newline-delimited JSON over stdin/stdout | PyO3/maturin extension (not implemented) |
-| Python HTTP layer | `http.server.ThreadingHTTPServer`, stdlib only, loopback bind | Third-party framework + WebSocket server |
+| Python HTTP layer | `http.server.ThreadingHTTPServer`, stdlib only; loopback bind by default, explicit LAN opt-in | Third-party framework + WebSocket server |
 | Browser | Static HTML/CSS/vanilla JS; snapshot pull via `POST /api/command` (`cmd: "snapshot"`) while running | Heavy frontend framework / persistent socket in MVP |
 | Wire format | Versioned JSON envelopes, `v: 1` | Unversioned line protocol (previous scaffold) |
 | Edit safety | Monotonic `revision`, `base_revision` required for edits, stale edits rejected | Last-write-wins mutation |
@@ -126,7 +126,7 @@ The browser is plain HTML/CSS/ES modules under `web/`. `web/js/transport.js` own
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /` and static files | Serves `web/` with a path-traversal guard; loopback `Host` required |
+| `GET /` and static files | Serves `web/` with a path-traversal guard; loopback `Host` required unless LAN mode is enabled |
 | `GET /api/health` | `hello` round trip; reports engine version and protocol |
 | `GET /api/snapshot` | Pulls one snapshot from the worker |
 | `POST /api/command` | Versioned engine command (see §5) |
@@ -164,7 +164,7 @@ Stale edit example:
 {"v":1,"id":"cmd-6","ok":false,"error":{"code":"stale_revision","message":"expected revision 3, got 2","retryable":false}}
 ```
 
-HTTP mapping: `/api/command` validates the envelope fields (`v`, `id`, `cmd`, `args`) and preserves its `id`; engine errors with client codes map to HTTP 400, engine failure and session loss to 503. `GET /api/health` calls `hello`; `GET /api/snapshot` returns a snapshot pulled from the worker. Static files are served from `web/` with a path-traversal guard. `Host` must be loopback; if `Origin` is present it must also be loopback HTTP. Request bodies are capped at 1 MiB.
+HTTP mapping: `/api/command` validates the envelope fields (`v`, `id`, `cmd`, `args`) and preserves its `id`; engine errors with client codes map to HTTP 400, engine failure and session loss to 503. `GET /api/health` calls `hello`; `GET /api/snapshot` returns a snapshot pulled from the worker. Static files are served from `web/` with a path-traversal guard. By default `Host` must be loopback; if `Origin` is present it must also be loopback HTTP. Binding a non-loopback address or passing `--allow-lan` enables LAN mode, which skips Host/Origin checks and prints a warning. Request bodies are capped at 1 MiB.
 
 ## 6. Project layout
 
@@ -178,7 +178,7 @@ engine/
 backend/
   __init__.py, __main__.py
   engine_client.py      worker lifecycle, NDJSON request/response, id correlation
-  server.py             loopback HTTP host, validation, static assets
+  server.py             HTTP host, validation, static assets, optional LAN mode
 web/
   index.html, app.js, style.css
 tests/
@@ -204,9 +204,9 @@ The browser then opens at `http://127.0.0.1:8000/`. `ELECTROW_ENGINE` overrides 
 ## 7. Dependency choices
 
 - **Rust: std only.** The protocol is small enough for a local JSON parser (~250 lines) and avoids a network-dependent build. `serde_json` is the likely future upgrade when schemas grow; it would not change the wire contract.
-- **Python: stdlib `http.server`.** No pip dependencies; `ThreadingHTTPServer` isolates blocking `readline` per request while the `RLock` protects the single worker. Adequate for loopback MVP. If remote hosting is ever required, revisit before adding features.
+- **Python: stdlib `http.server`.** No pip dependencies; `ThreadingHTTPServer` isolates blocking `readline` per request while the `RLock` protects the single worker. Loopback is the default; a non-loopback bind or `--allow-lan` skips Host/Origin checks for trusted development LANs. Hardened host/origin policy is deferred.
 - **No WebSocket yet.** Task 02 permits one if needed; pull snapshots at display cadence are sufficient for a contract spike and keep the surface small. A future `subscribe` stream can be exposed over WebSocket/SSE without changing command semantics.
-- **JS: vanilla ES modules later.** Current `app.js` uses plain functions and `fetch`; no build step or framework. Rendering choices (Canvas 2D vs SVG) are deferred to Task 07.
+- **JS: vanilla ES modules.** `app.js` and `web/js/` use ES modules and `fetch`; no build step or framework. Canvas 2D was chosen for the schematic viewport in Task 07.
 
 ## 8. Failure handling
 
@@ -217,7 +217,7 @@ The browser then opens at `http://127.0.0.1:8000/`. `ELECTROW_ENGINE` overrides 
 | Malformed JSON line from worker | Python raises protocol error; HTTP 503 |
 | Invalid HTTP envelope | HTTP 400 with error text; worker never sees it |
 | Stale revision | Engine returns `stale_revision`; HTTP 400; browser must refresh revision before retrying |
-| Foreign `Host`/`Origin` | HTTP 403 |
+| Foreign `Host`/`Origin` | HTTP 403 in loopback mode; accepted in LAN mode |
 | Request > 1 MiB | HTTP 413 |
 | `shutdown` | Ack, worker exits, Python waits then terminates/kills |
 

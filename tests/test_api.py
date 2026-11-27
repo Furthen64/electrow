@@ -135,6 +135,17 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual(response["error"]["code"], "stale_revision")
         status, _ = http_json(self.base, "/api/health", headers={"Host": "evil.example"})
         self.assertEqual(status, 403)
+        server.allow_lan = True
+        try:
+            status, health = http_json(
+                self.base,
+                "/api/health",
+                headers={"Host": "192.168.1.155:8090", "Origin": "http://192.168.1.155:8090"},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(health["protocol"], 1)
+        finally:
+            server.allow_lan = False
         status, bad_document = http_json(self.base, "/api/command", {
             "v": 1,
             "id": "py-3",
