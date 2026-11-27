@@ -1,6 +1,6 @@
 # Task 09 — Performance profiling and optimization
 
-Status: pending. Depends on 08 baseline correctness.
+Status: complete (2026-11-27). Depends on 08 baseline correctness. Delivered a reproducible release harness (`engine/examples/perf_bench.rs`) and report (`Docs/performance.md`) with recorded hardware/toolchain, repeated runs, component profile, simulated/wall ratios, steps/s, iterations, RSS delta, Python bridge bytes and browser frame latency. Hardware `perf` counters were unavailable (`perf_event_paranoid=4`), so opt-in software timers in `Circuit.perf` were used. Measured and applied two isolated optimizations (removed redundant per-step state clone; reused matrix buffer with in-place LU): step latency −18% to −48% across cases, with all 102 correctness tests, smoke, 5 API tests and 13 browser checks still passing. Dense LU remains the bottleneck for large networks; sparse solver and flat matrix storage are documented, unmeasured follow-ups. No parallel/GPU/precision changes.
 
 Measure release builds on recorded hardware/OS/toolchain. Compare reference and Electrow using equivalent circuits, simulated duration, step size/settings, accuracy and output sampling. Include small interactive circuits, large passive networks, nonlinear switching circuits and topology edits. Measure simulated seconds per wall second, accepted steps/s, iterations, solve/stamp time, topology rebuild time, allocations/memory, Python bridge overhead, transport bytes and browser frame latency. Report repeated runs and variability.
 

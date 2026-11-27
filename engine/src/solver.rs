@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use crate::json::Value;
 use crate::models;
@@ -182,6 +183,7 @@ pub struct StepOutcome {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+#[derive(Default)]
 struct Matrix {
     a: Vec<Vec<f64>>,
     b: Vec<f64>,
@@ -195,6 +197,22 @@ impl Matrix {
             b: vec![0.0; size],
             node_count,
         }
+    }
+
+    fn reset(&mut self, size: usize, node_count: usize) {
+        if self.a.len() != size {
+            self.a = vec![vec![0.0; size]; size];
+        } else {
+            for row in &mut self.a {
+                row.fill(0.0);
+            }
+        }
+        if self.b.len() != size {
+            self.b = vec![0.0; size];
+        } else {
+            self.b.fill(0.0);
+        }
+        self.node_count = node_count;
     }
 
     fn node_row(&self, node: usize) -> Option<usize> {
@@ -268,8 +286,17 @@ enum ElementMeta {
 }
 
 struct Assembly {
-    matrix: Matrix,
     meta: HashMap<String, ElementMeta>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CircuitProfile {
+    pub enabled: bool,
+    pub stamp_ns: u64,
+    pub solve_ns: u64,
+    pub analyze_ns: u64,
+    pub clone_ns: u64,
+    pub steps: u64,
 }
 
 pub struct Circuit {
@@ -285,6 +312,10 @@ pub struct Circuit {
     step_diagnostics: Vec<Diagnostic>,
     good_steps: u32,
     started: bool,
+    pub total_iterations: u64,
+    pub last_step_iterations: u32,
+    pub perf: CircuitProfile,
+    scratch: Matrix,
 }
 
 fn find_root(parent: &HashMap<String, String>, node: &str) -> String {
@@ -299,10 +330,12 @@ fn find_root(parent: &HashMap<String, String>, node: &str) -> String {
 }
 
 fn lu_solve(matrix: &[Vec<f64>], rhs: &[f64]) -> Result<Vec<f64>, Diagnostic> {
-    lu_solve_owned(matrix.to_vec(), rhs.to_vec())
+    let mut a = matrix.to_vec();
+    let mut b = rhs.to_vec();
+    lu_solve_in_place(&mut a, &mut b)
 }
 
-fn lu_solve_owned(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Result<Vec<f64>, Diagnostic> {
+fn lu_solve_in_place(a: &mut [Vec<f64>], b: &mut [f64]) -> Result<Vec<f64>, Diagnostic> {
     let size = a.len();
     if size == 0 {
         return Ok(Vec::new());
@@ -375,6 +408,10 @@ impl Circuit {
             step_diagnostics: Vec::new(),
             good_steps: 0,
             started: false,
+            total_iterations: 0,
+            last_step_iterations: 0,
+            perf: CircuitProfile::default(),
+            scratch: Matrix::default(),
         }
     }
 
@@ -556,6 +593,7 @@ impl Circuit {
     }
 
     pub fn analyze(&mut self) {
+        let profile_start = if self.perf.enabled { Some(Instant::now()) } else { None };
         let mut parent: HashMap<String, String> = HashMap::new();
         for element in &self.elements {
             for node in &element.nodes {
@@ -617,6 +655,9 @@ impl Circuit {
             .collect();
 
         self.refresh_diagnostics();
+        if let Some(start) = profile_start {
+            self.perf.analyze_ns += start.elapsed().as_nanos() as u64;
+        }
     }
 
     fn refresh_diagnostics(&mut self) {
@@ -671,6 +712,7 @@ impl Circuit {
         self.current_dt = DEFAULT_DT_S;
         self.good_steps = 0;
         self.started = false;
+        self.last_step_iterations = 0;
         self.step_diagnostics.clear();
         self.analyze();
     }
@@ -727,10 +769,10 @@ impl Circuit {
         (current, conductance)
     }
 
-    fn assemble(&self, state: &State, dt: f64) -> Result<Assembly, Diagnostic> {
+    fn assemble(&self, matrix: &mut Matrix, state: &State, dt: f64) -> Result<Assembly, Diagnostic> {
         let node_count = self.node_ids.len();
         let size = node_count.saturating_sub(1) + self.voltage_sources.len();
-        let mut matrix = Matrix::new(size, node_count);
+        matrix.reset(size, node_count);
         let mut meta = HashMap::new();
 
         for element in &self.elements {
@@ -887,7 +929,7 @@ impl Circuit {
                 parameter: "value".to_string(),
             });
         }
-        Ok(Assembly { matrix, meta })
+        Ok(Assembly { meta })
     }
 
     fn extract_voltages(&self, solution: &[f64]) -> Vec<f64> {
@@ -987,7 +1029,11 @@ impl Circuit {
     }
 
     fn attempt_step(&mut self, dt: f64) -> Result<(), Diagnostic> {
+        let clone_start = if self.perf.enabled { Some(Instant::now()) } else { None };
         let mut working = self.state.clone();
+        if let Some(start) = clone_start {
+            self.perf.clone_ns += start.elapsed().as_nanos() as u64;
+        }
         let nonlinear_indices: Vec<usize> = self
             .elements
             .iter()
@@ -996,12 +1042,18 @@ impl Circuit {
             .map(|(index, _)| index)
             .collect();
         let mut iterations = 0;
+        let mut matrix = std::mem::take(&mut self.scratch);
         loop {
-            let mut assembly = self.assemble(&working, dt)?;
-            let solution = lu_solve_owned(
-                std::mem::take(&mut assembly.matrix.a),
-                std::mem::take(&mut assembly.matrix.b),
-            )?;
+            let stamp_start = if self.perf.enabled { Some(Instant::now()) } else { None };
+            let assembly = self.assemble(&mut matrix, &working, dt)?;
+            if let Some(start) = stamp_start {
+                self.perf.stamp_ns += start.elapsed().as_nanos() as u64;
+            }
+            let solve_start = if self.perf.enabled { Some(Instant::now()) } else { None };
+            let solution = lu_solve_in_place(&mut matrix.a, &mut matrix.b)?;
+            if let Some(start) = solve_start {
+                self.perf.solve_ns += start.elapsed().as_nanos() as u64;
+            }
             let voltages = self.extract_voltages(&solution);
             let mut max_change = 0.0;
             for &index in &nonlinear_indices {
@@ -1086,10 +1138,14 @@ impl Circuit {
                 }
             }
             iterations += 1;
+            self.total_iterations += 1;
             if nonlinear_indices.is_empty() || max_change <= self.settings.convergence_tolerance_v {
+                self.last_step_iterations = iterations;
+                self.scratch = matrix;
                 return self.commit(working, &solution, &voltages, &assembly, dt);
             }
             if iterations >= self.settings.max_iterations {
+                self.scratch = matrix;
                 return Err(Diagnostic::NonConvergence {
                     iterations,
                     change_v: max_change,
@@ -1122,8 +1178,9 @@ impl Circuit {
         }
 
         for _ in 0..steps {
-            let saved_state = self.state.clone();
-            let saved_time = self.time_s;
+            if self.perf.enabled {
+                self.perf.steps += 1;
+            }
             let saved_dt = self.current_dt;
             let mut dt = self.current_dt;
             let mut accepted = false;
@@ -1137,8 +1194,6 @@ impl Circuit {
                         break;
                     }
                     Err(diagnostic) => {
-                        self.state = saved_state.clone();
-                        self.time_s = saved_time;
                         self.record_step_diagnostic(diagnostic.clone());
                         outcome.diagnostics.push(diagnostic);
                         dt /= 2.0;

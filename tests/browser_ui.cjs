@@ -129,9 +129,25 @@ async function main() {
   await wait(250);
   await screenshot("schematic.png");
 
+  await evaluate(`(() => {
+    window.__frames = [];
+    window.__frameObserver = new MutationObserver(() => window.__frames.push(performance.now()));
+    window.__frameObserver.observe(document.getElementById('stat-time'), {
+      childList: true, characterData: true, subtree: true,
+    });
+  })()`);
   await click("btn-run");
   await wait(1000);
   await click("btn-pause");
+  const frames = await evaluate("window.__frames.slice()");
+  const deltas = frames.slice(1).map((value, index) => value - frames[index]);
+  deltas.sort((a, b) => a - b);
+  if (deltas.length) {
+    const p50 = deltas[Math.floor(deltas.length * 0.5)];
+    const p95 = deltas[Math.min(deltas.length - 1, Math.floor(deltas.length * 0.95))];
+    console.log(`FRAME_LATENCY snapshots=${deltas.length} p50=${p50.toFixed(1)}ms p95=${p95.toFixed(1)}ms`);
+  }
+  await evaluate("window.__frameObserver.disconnect()");
   const afterRun = await evaluate(`({
     time: document.getElementById('stat-time').textContent,
     scopePixels: (() => {

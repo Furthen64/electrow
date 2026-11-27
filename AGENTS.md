@@ -17,7 +17,8 @@ Run these before reporting implementation work as complete. All commands run fro
 - `python tests/smoke.py` — end-to-end HTTP + real Rust worker, versioned protocol, solver round trip, file endpoints and error mapping.
 - `python -m backend` — launches the local UI on `http://127.0.0.1:8000/` for manual testing.
 - `python tests/test_api.py` — Python API tests for the real worker and HTTP server (revisions, errors, subscriptions, host checks).
-- `python tests/boundary_bench.py` — measures Python↔Rust command round-trip overhead; use when changing the worker protocol or transport.
+- `python tests/boundary_bench.py` — measures Python↔Rust command round-trip overhead and transport bytes; use when changing the worker protocol or transport.
+- `cargo run --release --example perf_bench -- --out Temp/perf.json` — release performance harness covering small, passive, nonlinear and topology-edit workloads; use before/after solver changes.
 - `./tests/run_browser_ui.sh` — browser UI harness. Starts a local backend (port 8123) and headless Chrome with CDP (port 9222), runs `tests/browser_ui.cjs`, and tears both down. Requires Chrome and Node 22+ (global `WebSocket`). Screenshots and logs are written to `Temp/browser-ui/`. Override with `ELECTROW_CHROME`, `ELECTROW_BROWSER_PORT` and `ELECTROW_CDP_PORT`.
 - `node tests/browser_ui.cjs --base <url> --cdp <url> --out <dir>` — the same browser checks against already-running services; no servers are started or stopped.
 
