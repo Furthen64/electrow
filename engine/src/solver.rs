@@ -192,14 +192,6 @@ struct Matrix {
 }
 
 impl Matrix {
-    fn new(size: usize, node_count: usize) -> Self {
-        Self {
-            a: vec![vec![0.0; size]; size],
-            b: vec![0.0; size],
-            node_count,
-        }
-    }
-
     fn reset(&mut self, size: usize, node_count: usize) {
         if self.a.len() != size {
             self.a = vec![vec![0.0; size]; size];
@@ -329,12 +321,6 @@ fn find_root(parent: &HashMap<String, String>, node: &str) -> String {
         current = next.clone();
     }
     current
-}
-
-fn lu_solve(matrix: &[Vec<f64>], rhs: &[f64]) -> Result<Vec<f64>, Diagnostic> {
-    let mut a = matrix.to_vec();
-    let mut b = rhs.to_vec();
-    lu_solve_in_place(&mut a, &mut b)
 }
 
 fn lu_solve_in_place(a: &mut [Vec<f64>], b: &mut [f64]) -> Result<Vec<f64>, Diagnostic> {
@@ -1436,10 +1422,11 @@ mod tests {
 
     #[test]
     fn stamps_matrix_and_solves_known_system() {
-        let mut matrix = Matrix::new(3, 3);
+        let mut matrix = Matrix::default();
+        matrix.reset(3, 3);
         matrix.stamp_conductance(1, 2, 0.01);
         matrix.stamp_voltage_source(1, 0, 10.0, 0);
-        let solution = lu_solve(&matrix.a, &matrix.b).unwrap();
+        let solution = lu_solve_in_place(&mut matrix.a, &mut matrix.b).unwrap();
         assert!((solution[0] - 10.0).abs() < 1e-9);
         assert!((solution[1] - 10.0).abs() < 1e-9);
         assert!(solution[2].abs() < 1e-9);
@@ -1447,8 +1434,12 @@ mod tests {
 
     #[test]
     fn singular_matrix_is_diagnosed() {
-        let matrix = vec![vec![1.0, 1.0], vec![1.0, 1.0]];
-        assert_eq!(lu_solve(&matrix, &[1.0, 2.0]), Err(Diagnostic::SingularMatrix));
+        let mut matrix = vec![vec![1.0, 1.0], vec![1.0, 1.0]];
+        let mut rhs = vec![1.0, 2.0];
+        assert_eq!(
+            lu_solve_in_place(&mut matrix, &mut rhs),
+            Err(Diagnostic::SingularMatrix)
+        );
     }
 
     #[test]

@@ -3,6 +3,8 @@ import json
 import mimetypes
 import os
 import re
+import sys
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -247,20 +249,33 @@ def main():
         action="store_true",
         help="accept any Host/Origin (development only)",
     )
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="open the UI in the default browser",
+    )
     args = parser.parse_args()
 
     allow_lan = args.allow_lan or args.host not in ALLOWED_HOSTS
     if allow_lan:
         print("LAN mode: Host/Origin checks disabled (development only)", flush=True)
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    try:
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
+    except OSError as exc:
+        print(f"cannot bind {args.host}:{args.port}: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(2)
     server.daemon_threads = True
     if args.host in ("0.0.0.0", "::"):
         print(
             f"Electrow UI at http://<host-ip>:{args.port}/ (or http://127.0.0.1:{args.port}/ locally)",
             flush=True,
         )
+        open_host = "127.0.0.1"
     else:
         print(f"Electrow UI at http://{args.host}:{args.port}/", flush=True)
+        open_host = args.host
+    if args.open:
+        webbrowser.open(f"http://{open_host}:{args.port}/")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

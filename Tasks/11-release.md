@@ -1,6 +1,6 @@
 # Task 11 — Local application packaging and release readiness
 
-Status: pending. Depends on 06–10.
+Status: complete (2026-11-27). Depends on 06–10. Delivered `Docs/release.md`, `RELEASE_NOTES.md`, `release.sh` and launch `--open` support (POSIX/Windows). Verified targets, dependency/license inventory, corresponding-source plan and known limitations. Evidence: `./release.sh` ran offline Rust tests (105 passed), Python smoke/API (5 passed), browser harness (15/15), source archive (124 files, no reference/Temp/circuits/FutureSimulation paths or binary assets) plus release worker binary and `SHA256SUMS`, extracted clean environment with offline Rust tests/build and smoke/API passing. Port conflict exits 2 with a clear message; SIGINT exits 0. No external runtime dependencies, no Electron/NW.js, no donor folders or bundled assets packaged.
 
 Document supported Windows/Linux targets, Rust and Python versions and reproducible build steps. Provide simple local launch flow serving the UI on loopback and opening a browser if desired. Choose packaging after measuring build/runtime dependencies; avoid shipping NW.js/Electron unless later justified. Pin dependencies, test on clean environments and verify shutdown, port conflicts and offline operation.
 

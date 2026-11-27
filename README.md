@@ -4,7 +4,7 @@ Electrow is a planned open-source circuit simulator with a web-based interface, 
 
 ## Project status
 
-Tasks 01–10 are complete. Task 11 (release readiness) remains.
+All implementation tasks are complete. See [RELEASE_NOTES.md](RELEASE_NOTES.md) and [Docs/release.md](Docs/release.md) for targets, packaging and known limitations.
 
 ## Run locally
 
@@ -14,10 +14,10 @@ Requirements: Rust (cargo/rustc) and Python 3.12+. Check the toolchain with `./c
 cargo test --workspace
 cargo build --workspace
 python tests/smoke.py
-python -m backend --host 127.0.0.1 --port 8000
+python -m backend --host 127.0.0.1 --port 8000 --open
 ```
 
-Open `http://127.0.0.1:8000/` (use `http://`, not `https://`; Firefox's HTTPS-Only mode can cause a TLS error against this plaintext port). Press **Create**, add components, subscribe, then **Run** (the backend steps the engine every 16 ms while running and the page polls snapshots every 50 ms). **Save file** / **Load file** write and read circuit JSON in `circuits/`; names are restricted to letters, digits, `_` and `-`. Set `ELECTROW_ENGINE` to override the worker path and `ELECTROW_CIRCUITS_DIR` to relocate the circuit folder.
+`--open` launches the default browser at the loopback URL; omit it to start headlessly. Open `http://127.0.0.1:8000/` (use `http://`, not `https://`; Firefox's HTTPS-Only mode can cause a TLS error against this plaintext port). Press **Create**, add components, subscribe, then **Run** (the backend steps the engine every 16 ms while running and the page polls snapshots every 50 ms). **Save file** / **Load file** write and read circuit JSON in `circuits/`; names are restricted to letters, digits, `_` and `-`. Set `ELECTROW_ENGINE` to override the worker path and `ELECTROW_CIRCUITS_DIR` to relocate the circuit folder.
 
 For LAN access during development, bind a non-loopback address; Host/Origin checks are then relaxed automatically, or pass `--allow-lan` explicitly:
 
@@ -37,7 +37,8 @@ Python talks to the Rust worker over a versioned newline-delimited JSON protocol
 | `./checkreqs.ps1` | Check cargo, rustc and Python 3.12+ |
 | `./winbuild.ps1` | Check requirements, build Rust, syntax-check Python and JS |
 | `./test.ps1` | Build, run Rust unit tests and the real-worker HTTP smoke test |
-| `./winlaunch.ps1` | Build and launch the local server; `-NoBuild` skips the build, `-Port 8001` changes the port |
+| `./winlaunch.ps1` | Build and launch the local server; `-NoBuild` skips the build, `-Port 8001` changes the port, `-Open` opens the browser |
+| `./release.sh` | Full offline verification, source archive, worker binary and clean-environment smoke tests |
 
 ## License
 
