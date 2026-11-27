@@ -1,6 +1,6 @@
 # Component models (Task 04)
 
-Implemented: wires, ground, resistors, independent voltage/current sources, switches, capacitors, inductors, diodes, simplified BJTs and MOSFETs. The model registry in `engine/src/models.rs` is the single source of truth for supported kinds, terminal mapping, parameter defaults and validation rules; the solver consumes it in `engine/src/solver.rs`.
+Implemented: wires, ground, resistors, independent voltage/current sources, switches, capacitors, inductors, diodes, simplified BJTs and MOSFETs, and a four-terminal Vactrol optocoupler (Task 10). The model registry in `engine/src/models.rs` is the single source of truth for supported kinds, terminal mapping, parameter defaults and validation rules; the solver consumes it in `engine/src/solver.rs`.
 
 All models are idealized; they are not SPICE equivalence. Nonlinear models use the same Newton-style iteration as the diode: clamp per-step voltage changes, iterate until `|ΔV| <= convergence_tolerance_v` or `max_iterations` is hit, roll back on failure.
 
@@ -21,6 +21,7 @@ Conventions: positive current flows from terminal 0 to terminal 1 (or across the
 | `switch` | a, b | Ideal switch: closed = small resistance, open = no connection |
 | `bjt` | base, collector, emitter | Simplified BJT, Shockley BE + beta-controlled collector current |
 | `mosfet` | gate, source, drain | Simplified square-law MOSFET, no body diodes |
+| `vactrol` | led_anode, led_cathode, cell_a, cell_b | Resistive optocoupler: LED drives an isolated first-order conductance cell |
 
 ## Parameter defaults and validation
 
@@ -42,6 +43,12 @@ Conventions: positive current flows from terminal 0 to terminal 1 (or across the
 | `mosfet` | `pnp` | 0.0 | binary (0 = NMOS, 1 = PMOS) |
 | `mosfet` | `vt` | 1.5 | finite |
 | `mosfet` | `beta` | 0.02 | positive |
+| `vactrol` | `dark_resistance_ohm` | 10e6 | positive |
+| `vactrol` | `resistance_at_1ma_ohm` | 30e3 | positive |
+| `vactrol` | `response_exponent` | 0.8 | positive |
+| `vactrol` | `minimum_resistance_ohm` | 1.5e3 | positive |
+| `vactrol` | `turn_on_s` | 2.5e-3 | positive |
+| `vactrol` | `turn_off_s` | 8.403422185645153e-3 | positive |
 
 Unsupported kinds are rejected at `add` time with `invalid_value` / `kind`. Unsupported parameter keys are accepted by `set_parameter` (existing contract) but have no effect.
 
@@ -68,6 +75,12 @@ Nonlinear iteration clamps source/drain voltage changes to ±0.5 V per step; con
 
 Limits: no body diodes, no bulk terminal, no `rds` model, no avalanche/gilbert/trap effects.
 
+### `vactrol` (Task 10)
+
+Behavioral reimplementation of the Vactrol fork's documented transfer model (see [fork-features.md](fork-features.md)); no Java source was copied. The LED uses a fixed Shockley model (`Is = 3.203535273232067e-9`, emission `4.077`, `Vt = 0.025865`, exponent clamped to 50). For LED current `I > 0`:
+
+`Rtarget = clamp(30 kΩ * (I/1 mA)^-0.8, 1.5 kΩ, 10 MΩ)`, with the parameters above; `I <= 0` gives the dark resistance. Cell conductance is advanced with the exact first-order solution `G += (Gtarget - G) * (1 - exp(-dt/tau))`, where `tau` is `turn_on_s` when rising and `turn_off_s` when falling. This is stable when the timestep grows. LED reverse breakdown (3 V), avalanche and noise are not implemented. `current` measurement is the cell current; `voltage` is the LED voltage.
+
 ## Tests
 
 Regression tests live in `engine/src/solver.rs` and `engine/src/models.rs`.
@@ -76,6 +89,9 @@ Regression tests live in `engine/src/solver.rs` and `engine/src/models.rs`.
 - `switch_toggle_rejects_invalid_binary_value`: `closed = 0.5` rejected.
 - `bjt_converges_and_scales_with_beta`: NPN driven from 1 MΩ base resistor; `Vb` in [0.4, 0.8] V and `Ic ≈ beta * Ib` consistent with the Shockley equation.
 - `mosfet_linear_region_matches_analytic_ids`: NMOS in linear region (VGS = 5 V, VDS = 3 V, vt = 1.5, beta = 0.02); `ids` matches the analytic `beta * ((vgs - vt) * vds - vds^2 / 2)` within 5 mA.
+- `vactrol_transfer_matches_documented_checkpoints`: 0/1/10/40 mA map to 10 MΩ / 30 kΩ / ~4.75 kΩ / ~1.57 kΩ, with min/max clamps.
+- `vactrol_conductance_update_is_exact_and_bounded`: exact first-order step and no overshoot for large timesteps.
+- `vactrol_fixture`: driven LED pulls down a 10 kΩ load after 10 ms (`tests/fixtures/10-vactrol.json`).
 - `unsupported_kind_is_rejected_at_add_time`: unknown kinds are rejected by `apply_operations`.
 - `models::tests::registry_covers_supported_kinds`: the registry lists every supported kind.
 

@@ -142,6 +142,7 @@ pub struct ElementState {
     pub i: f64,
     pub v2: f64,
     pub v3: f64,
+    pub g: f64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -282,6 +283,7 @@ impl Matrix {
 enum ElementMeta {
     Passive { g: f64, ieq: f64 },
     VoltageSource { index: usize },
+    Vactrol { g_led: f64, ieq_led: f64, g_cell: f64 },
     None,
 }
 
@@ -769,6 +771,49 @@ impl Circuit {
         (current, conductance)
     }
 
+    fn vactrol_led_current(voltage: f64) -> (f64, f64) {
+        const IS: f64 = 3.203535273232067e-9;
+        const EMISSION: f64 = 4.077;
+        let thermal = EMISSION * 0.025865;
+        let exponent = (voltage / thermal).clamp(-100.0, 50.0);
+        let exp = exponent.exp();
+        (IS * (exp - 1.0), IS * exp / thermal)
+    }
+
+    fn vactrol_target_conductance(element: &Element, led_current: f64) -> f64 {
+        let dark = element.params.get("dark_resistance_ohm").copied().unwrap_or(10e6);
+        let at_one_ma = element.params.get("resistance_at_1ma_ohm").copied().unwrap_or(30e3);
+        let exponent = element.params.get("response_exponent").copied().unwrap_or(0.8);
+        let minimum = element.params.get("minimum_resistance_ohm").copied().unwrap_or(1.5e3);
+        if !(led_current > 0.0) {
+            return 1.0 / dark;
+        }
+        let resistance = at_one_ma * (led_current * 1000.0).powf(-exponent);
+        let resistance = if !resistance.is_finite() || resistance > dark {
+            dark
+        } else if resistance < minimum {
+            minimum
+        } else {
+            resistance
+        };
+        1.0 / resistance
+    }
+
+    fn vactrol_advance_conductance(
+        element: &Element,
+        conductance: f64,
+        target: f64,
+        dt: f64,
+    ) -> f64 {
+        let turn_on = element.params.get("turn_on_s").copied().unwrap_or(2.5e-3);
+        let turn_off = element.params.get("turn_off_s").copied().unwrap_or(8.403422185645153e-3);
+        let time_constant = if target > conductance { turn_on } else { turn_off };
+        if !(time_constant > 0.0) || !(dt > 0.0) {
+            return target;
+        }
+        conductance + (target - conductance) * (1.0 - (-dt / time_constant).exp())
+    }
+
     fn assemble(&self, matrix: &mut Matrix, state: &State, dt: f64) -> Result<Assembly, Diagnostic> {
         let node_count = self.node_ids.len();
         let size = node_count.saturating_sub(1) + self.voltage_sources.len();
@@ -856,6 +901,28 @@ impl Circuit {
                     matrix.stamp_conductance(a, b, g);
                     matrix.stamp_current(a, b, ieq);
                     meta.insert(element.id.clone(), ElementMeta::Passive { g, ieq });
+                }
+                "vactrol" => {
+                    let previous = state.elements.get(&element.id).cloned().unwrap_or_default();
+                    let (led_current, g_led) = Self::vactrol_led_current(previous.v);
+                    let ieq_led = led_current - g_led * previous.v;
+                    matrix.stamp_conductance(a, b, g_led);
+                    matrix.stamp_current(a, b, ieq_led);
+                    let dark = element.params.get("dark_resistance_ohm").copied().unwrap_or(10e6);
+                    let g_cell = if previous.g.is_finite() && previous.g > 0.0 {
+                        previous.g
+                    } else {
+                        1.0 / dark
+                    };
+                    matrix.stamp_conductance(idxs[2], idxs[3], g_cell);
+                    meta.insert(
+                        element.id.clone(),
+                        ElementMeta::Vactrol {
+                            g_led,
+                            ieq_led,
+                            g_cell,
+                        },
+                    );
                 }
                 "switch" => {
                     let closed = element.params.get("closed").copied().unwrap_or(1.0);
@@ -962,6 +1029,7 @@ impl Circuit {
             let b = self.node_index.get(&element.nodes[1]).copied().unwrap_or(0);
             let voltage = voltages.get(a).copied().unwrap_or(0.0)
                 - voltages.get(b).copied().unwrap_or(0.0);
+            let updated_g = state.elements.get(&element.id).map(|state| state.g).unwrap_or(0.0);
             let entry = state.elements.entry(element.id.clone()).or_default();
             match assembly.meta.get(&element.id) {
                 Some(ElementMeta::VoltageSource { index }) => {
@@ -971,6 +1039,25 @@ impl Circuit {
                 Some(ElementMeta::Passive { g, ieq }) => {
                     entry.i = g * voltage + ieq;
                     entry.v = voltage;
+                }
+                Some(ElementMeta::Vactrol {
+                    g_led,
+                    ieq_led,
+                    g_cell,
+                }) => {
+                    let cell_a = self.node_index.get(&element.nodes[2]).copied().unwrap_or(0);
+                    let cell_b = self.node_index.get(&element.nodes[3]).copied().unwrap_or(0);
+                    let cell_voltage = voltages.get(cell_a).copied().unwrap_or(0.0)
+                        - voltages.get(cell_b).copied().unwrap_or(0.0);
+                    let conductance = if updated_g.is_finite() && updated_g > 0.0 {
+                        updated_g
+                    } else {
+                        *g_cell
+                    };
+                    entry.i = conductance * cell_voltage;
+                    entry.v2 = g_led * voltage + ieq_led;
+                    entry.v = voltage;
+                    entry.g = conductance;
                 }
                 _ => match element.kind.as_str() {
                     "bjt" => {
@@ -1038,7 +1125,7 @@ impl Circuit {
             .elements
             .iter()
             .enumerate()
-            .filter(|(_, e)| matches!(e.kind.as_str(), "diode" | "bjt" | "mosfet"))
+            .filter(|(_, e)| matches!(e.kind.as_str(), "diode" | "bjt" | "mosfet" | "vactrol"))
             .map(|(index, _)| index)
             .collect();
         let mut iterations = 0;
@@ -1076,6 +1163,34 @@ impl Circuit {
                         } else {
                             new_voltage
                         };
+                    }
+                    "vactrol" => {
+                        let anode = self.node_index.get(&element.nodes[0]).copied().unwrap_or(0);
+                        let cathode = self.node_index.get(&element.nodes[1]).copied().unwrap_or(0);
+                        let new_led_voltage = voltages.get(anode).copied().unwrap_or(0.0)
+                            - voltages.get(cathode).copied().unwrap_or(0.0);
+                        let previous = working.elements.entry(id.clone()).or_default();
+                        let change = (new_led_voltage - previous.v).abs();
+                        if change > max_change {
+                            max_change = change;
+                        }
+                        let limit = self.settings.max_diode_step_v;
+                        previous.v = if change > limit {
+                            previous.v + (new_led_voltage - previous.v).signum() * limit
+                        } else {
+                            new_led_voltage
+                        };
+                        let led_current = Self::vactrol_led_current(previous.v).0.max(0.0);
+                        let target = Self::vactrol_target_conductance(element, led_current);
+                        if previous.g <= 0.0 || !previous.g.is_finite() {
+                            previous.g = 1.0 / element
+                                .params
+                                .get("dark_resistance_ohm")
+                                .copied()
+                                .unwrap_or(10e6);
+                        }
+                        previous.g =
+                            Self::vactrol_advance_conductance(element, previous.g, target, dt);
                     }
                     "bjt" => {
                         let pnp = element.params.get("pnp").copied().unwrap_or(0.0);
@@ -1618,6 +1733,49 @@ mod tests {
         assert!((vgs - 5.0).abs() < 1e-9);
         let ids = circuit.measurement("m1", "current").unwrap();
         assert!((ids - expected).abs() < 0.005, "ids={ids}, expected={expected}");
+    }
+
+    #[test]
+    fn vactrol_transfer_matches_documented_checkpoints() {
+        let element = Element::new(
+            "v".to_string(),
+            "vactrol".to_string(),
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string(),
+            ],
+        );
+        let resistance = |current| 1.0 / Circuit::vactrol_target_conductance(&element, current);
+        assert!((resistance(0.0) - 10e6).abs() < 1.0);
+        assert!((resistance(1e-3) - 30e3).abs() < 1.0);
+        assert!((resistance(10e-3) - 4.75e3).abs() < 100.0);
+        assert!((resistance(40e-3) - 1.57e3).abs() < 30.0);
+        assert!(resistance(100.0) >= 1.5e3);
+        assert!(resistance(-1.0) >= 10e6 - 1.0);
+    }
+
+    #[test]
+    fn vactrol_conductance_update_is_exact_and_bounded() {
+        let element = Element::new(
+            "v".to_string(),
+            "vactrol".to_string(),
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string(),
+            ],
+        );
+        let from = 1e-7;
+        let to = 1e-4;
+        let on = element.params.get("turn_on_s").copied().unwrap();
+        let advanced = Circuit::vactrol_advance_conductance(&element, from, to, on);
+        let expected = from + (to - from) * (1.0 - (-1.0_f64).exp());
+        assert!((advanced - expected).abs() < 1e-12);
+        assert!(Circuit::vactrol_advance_conductance(&element, from, to, 10.0) <= to);
+        assert!(Circuit::vactrol_advance_conductance(&element, to, from, 10.0) >= from);
     }
 
     #[test]

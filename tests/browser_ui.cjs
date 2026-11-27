@@ -124,6 +124,8 @@ async function main() {
   results.push(report("divider demo builds topology", divider.revision >= 5, `revision ${divider.revision}`));
   results.push(report("divider demo has a healthy solve", divider.diagnostics.includes("None"), divider.diagnostics));
   results.push(report("divider midpoint is 5 V", divider.measurements.includes("5.00000 V") && divider.nodes.includes("5.00000 V")));
+  const dirtyAfterEdit = await evaluate("!document.getElementById('dirty').hidden");
+  results.push(report("unsaved badge appears after edits", dirtyAfterEdit));
 
   await evaluate("document.getElementById('schematic').scrollIntoView({block:'center'})");
   await wait(250);
@@ -182,15 +184,29 @@ async function main() {
 
   const name = "browser-ui-check";
   await evaluate(`document.getElementById('file-name').value = '${name}'`);
-  await click("btn-save-file");
+  await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', {key: 's', ctrlKey: true, bubbles: true}))`);
+  await wait(500);
   const saveResponse = await text("response");
-  await click("btn-new");
+  const dirtyAfterSave = await evaluate("!document.getElementById('dirty').hidden");
+  results.push(report("ctrl+s saves the circuit", saveResponse.includes(name) && !dirtyAfterSave));
+  await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', {key: 'n', ctrlKey: true, bubbles: true}))`);
+  await wait(500);
   const cleared = await exportCount();
-  await click("btn-load-file");
+  results.push(report("ctrl+n clears the editor", cleared === 0, `${cleared} elements`));
+  await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', {key: 'o', ctrlKey: true, bubbles: true}))`);
+  await wait(500);
   const restored = await exportCount();
-  results.push(report("save file succeeds", saveResponse.includes(name), saveResponse.slice(0, 80)));
-  results.push(report("new circuit clears the editor", cleared === 0, `${cleared} elements`));
-  results.push(report("load file restores elements", restored === redone, `${restored} elements`));
+  results.push(report("ctrl+o restores elements", restored === redone, `${restored} elements`));
+
+  await evaluate(`document.getElementById('build-kind').value = 'bjt'`);
+  await evaluate(`document.getElementById('build-id').value = 'q1'`);
+  await click("btn-add-element");
+  await evaluate(`document.getElementById('param-id').value = 'q1'`);
+  await evaluate(`document.getElementById('transistor-preset').value = '2N3904'`);
+  await click("btn-apply-preset");
+  const presetStatus = await text("editor-status");
+  const withPreset = await exportCount();
+  results.push(report("BJT preset applies", presetStatus.includes("2N3904") && withPreset === restored + 1, `${withPreset} elements`));
 
   const dump =
     "$ 1 5.0E-6 10 63 10.0 62\n" +

@@ -1,5 +1,5 @@
 import { Transport } from "./js/transport.js";
-import { CircuitDocument, snap } from "./js/circuit.js";
+import { CircuitDocument, snap, TERMINALS } from "./js/circuit.js";
 import { SchematicView } from "./js/renderer.js";
 import { Scope } from "./js/scope.js";
 import { Editor } from "./js/editor.js";
@@ -16,6 +16,10 @@ const editor = new Editor({
   onStatus: (text) => {
     document.getElementById("editor-status").textContent = text;
   },
+  onDirty: (dirty = true) => setDirty(dirty),
+  onSave: () => saveFile(),
+  onOpen: () => loadFile(),
+  onNew: () => newCircuit(),
 });
 
 const els = {
@@ -162,7 +166,7 @@ bind("btn-hello", async () => {
     els.response.textContent = String(health.error);
   }
 });
-bind("btn-new", () => editor.newCircuit());
+bind("btn-new", () => newCircuit());
 bind("btn-divider", buildDividerDemo);
 
 bind("btn-add-element", async () => {
@@ -174,10 +178,11 @@ bind("btn-add-element", async () => {
     snap(view.camera.x),
     snap(view.camera.y),
     snap(view.camera.x + 100),
-    snap(view.camera.y)
+    snap(view.camera.y),
+    document.getElementById("build-id").value.trim() || null
   );
   const element = documentModel.find(id);
-  element.nodes = kind === "ground" ? [nodeA] : [nodeA, nodeB];
+  if (TERMINALS[kind] === 2) element.nodes = [nodeA, nodeB];
   await editor.sync();
   editor.status(`Added ${kind} ${id}`);
   document.getElementById("param-id").value = id;
@@ -252,17 +257,50 @@ bind("btn-export", async () => {
   els.exportOutput.textContent = JSON.stringify(result, null, 2);
 });
 
-bind("btn-save-file", async () => {
+function setDirty(dirty = true) {
+  const badge = document.getElementById("dirty");
+  badge.hidden = !dirty;
+  badge.className = dirty ? "badge badge-warn" : "badge badge-muted";
+}
+
+async function saveFile() {
   const name = document.getElementById("file-name").value.trim();
-  if (!name) return showResult({ ok: false, error: { code: "bad_request", message: "Enter a name first" } });
-  await showResult(transport.fileCommand("/api/circuit/save", name));
-});
-bind("btn-load-file", async () => {
+  if (!name) {
+    await showResult({ ok: false, error: { code: "bad_request", message: "Enter a name first" } });
+    return false;
+  }
+  const result = await showResult(transport.fileCommand("/api/circuit/save", name));
+  if (result) setDirty(false);
+  return Boolean(result);
+}
+
+async function loadFile() {
   const name = document.getElementById("file-name").value.trim();
-  if (!name) return showResult({ ok: false, error: { code: "bad_request", message: "Enter a name first" } });
+  if (!name) {
+    await showResult({ ok: false, error: { code: "bad_request", message: "Enter a name first" } });
+    return false;
+  }
   transport.setPolling(false);
   const result = await showResult(transport.fileCommand("/api/circuit/load", name));
-  if (result) await editor.pullFromBackend();
+  if (!result) return false;
+  await editor.pullFromBackend();
+  setDirty(false);
+  return true;
+}
+
+async function newCircuit() {
+  await editor.newCircuit();
+  setDirty(false);
+}
+
+bind("btn-save-file", () => saveFile());
+bind("btn-load-file", () => loadFile());
+bind("btn-apply-preset", async () => {
+  const id = document.getElementById("param-id").value.trim();
+  const name = document.getElementById("transistor-preset").value;
+  if (!name) return showResult({ ok: false, error: { code: "bad_request", message: "Choose a preset" } });
+  const ok = await editor.applyPreset(id, name);
+  if (!ok) showResult({ ok: false, error: { code: "bad_request", message: "Select a bjt element" } });
 });
 bind("btn-refresh-files", async () => {
   const select = document.getElementById("file-list");

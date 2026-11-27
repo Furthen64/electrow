@@ -15,6 +15,7 @@
       </div>
       <div class="topbar-status">
         <span id="status" class="badge badge-muted">connecting</span>
+        <span id="dirty" class="badge badge-muted" hidden>unsaved changes</span>
         <span id="engine-info" class="muted">engine: unknown</span>
       </div>
     </header>
@@ -85,6 +86,9 @@
             <option value="inductor">inductor</option>
             <option value="diode">diode</option>
             <option value="switch">switch</option>
+            <option value="bjt">bjt</option>
+            <option value="mosfet">mosfet</option>
+            <option value="vactrol">vactrol</option>
             <option value="wire">wire</option>
             <option value="ground">ground</option>
           </select></label>
@@ -109,6 +113,17 @@
           <label>Value<input id="param-value" type="number" value="1000"></label>
         </div>
         <div class="button-row"><button id="btn-set-param">Set parameter</button></div>
+        <hr>
+        <p class="hint">BJT presets set <code>beta</code> and <code>is_a</code> from the Vactrol fork's simplified values.</p>
+        <div class="form-row">
+          <label>Transistor preset<select id="transistor-preset">
+            <option value="">choose…</option>
+            <option value="2N2222">2N2222</option>
+            <option value="2N2222A">2N2222A</option>
+            <option value="2N3904">2N3904</option>
+          </select></label>
+        </div>
+        <div class="button-row"><button id="btn-apply-preset">Apply preset</button></div>
       </section>
 
       <section class="panel">

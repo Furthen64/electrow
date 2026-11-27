@@ -3,12 +3,16 @@ import { GRID, snap } from "./circuit.js";
 const PALETTE = ["wire", "resistor", "voltage_source", "current_source", "capacitor", "inductor", "diode", "switch", "ground"];
 
 export class Editor {
-  constructor({ transport, view, document, scope, onStatus }) {
+  constructor({ transport, view, document, scope, onStatus, onDirty, onSave, onOpen, onNew }) {
     this.transport = transport;
     this.view = view;
     this.document = document;
     this.scope = scope;
     this.onStatus = onStatus || (() => {});
+    this.onDirty = onDirty || (() => {});
+    this.onSave = onSave || (() => {});
+    this.onOpen = onOpen || (() => {});
+    this.onNew = onNew || (() => {});
     this.selected = null;
     this.busy = false;
 
@@ -70,7 +74,16 @@ export class Editor {
     window.addEventListener("keydown", (event) => {
       const tag = event.target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (event.key === "Delete" || event.key === "Backspace") {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        this.onSave();
+        event.preventDefault();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "o") {
+        this.onOpen();
+        event.preventDefault();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
+        this.onNew();
+        event.preventDefault();
+      } else if (event.key === "Delete" || event.key === "Backspace") {
         this.deleteSelected();
         event.preventDefault();
       } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
@@ -129,6 +142,7 @@ export class Editor {
     try {
       const result = await this.document.sync(this.transport);
       if (!result.ok) this.status(`Sync failed: ${result.error?.message || "unknown"}`);
+      else this.onDirty();
       await this.subscribeSignals();
     } finally {
       this.busy = false;
@@ -177,6 +191,7 @@ export class Editor {
     this.selected = null;
     this.view.selected = null;
     this.scope.clear();
+    this.onDirty(false);
     this.status("New empty circuit");
   }
 
@@ -187,6 +202,7 @@ export class Editor {
     this.view.selected = null;
     this.scope.clear();
     await this.sync();
+    this.onDirty(false);
     this.status(`Loaded ${elements.length} elements`);
   }
 
@@ -204,6 +220,24 @@ export class Editor {
       });
     }
     return result;
+  }
+
+  async applyPreset(id, name) {
+    const presets = {
+      "2N2222": { beta: 200, is_a: 14.34e-15 },
+      "2N2222A": { beta: 200, is_a: 14.34e-15 },
+      "2N3904": { beta: 200, is_a: 6.734e-15 },
+    };
+    const values = presets[name];
+    const element = this.document.find(id);
+    if (!values || !element || element.kind !== "bjt") {
+      this.status("Select a bjt element and choose a preset");
+      return false;
+    }
+    for (const [key, value] of Object.entries(values)) this.document.setParam(id, key, value);
+    await this.sync();
+    this.status(`Applied ${name} parameters to ${id}`);
+    return true;
   }
 
   async pullFromBackend() {

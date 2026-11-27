@@ -1,0 +1,24 @@
+{
+  "id": "vactrol-optocoupler",
+  "version": 1,
+  "source": "independently implemented from the documented Vactrol transfer model",
+  "description": "LED driven at about 3.5 mA through 1 kohm; cell pulls down a 10 kohm load after 10 ms.",
+  "circuit": {
+    "format": "electrow-circuit",
+    "version": 1,
+    "circuit_id": "fixture-vactrol",
+    "elements": [
+      {"id": "gnd", "kind": "ground", "nodes": ["gnd"]},
+      {"id": "vled", "kind": "voltage_source", "nodes": ["vin", "gnd"], "params": {"voltage_v": 5}},
+      {"id": "rled", "kind": "resistor", "nodes": ["vin", "led_a"], "params": {"resistance_ohm": 1000}},
+      {"id": "vo1", "kind": "vactrol", "nodes": ["led_a", "gnd", "cell_a", "gnd"]},
+      {"id": "vcell", "kind": "voltage_source", "nodes": ["cell_v", "gnd"], "params": {"voltage_v": 5}},
+      {"id": "rload", "kind": "resistor", "nodes": ["cell_v", "cell_a"], "params": {"resistance_ohm": 10000}}
+    ]
+  },
+  "settings": {"dt_s": 5e-6, "steps": 2000},
+  "checks": [
+    {"type": "range", "id": "led_a", "min": 1.2, "max": 1.7},
+    {"type": "range", "id": "vo1", "quantity": "current", "min": 0.0001, "max": 0.001}
+  ]
+}

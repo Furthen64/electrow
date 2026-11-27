@@ -8,6 +8,9 @@ const COLORS = {
   diode: "#ffb07a",
   switch: "#d6dee9",
   ground: "#9fb0c3",
+  bjt: "#8fd0b7",
+  mosfet: "#b9a7ff",
+  vactrol: "#f0a6c8",
 };
 
 function endpoints(element) {
@@ -166,6 +169,21 @@ const symbols = {
     line(ctx, (x1 + x2) / 2 - 8, y1, (x1 + x2) / 2 + 8, closed ? y1 : y1 - 14, 2, COLORS.switch);
     line(ctx, (x1 + x2) / 2 + 8, y1, x2, y2, 2, COLORS.switch);
     label(ctx, closed ? "closed" : "open", (x1 + x2) / 2, y1 - 22, COLORS.switch);
+  },
+  vactrol(ctx, element) {
+    const [x1, y1, x2, y2] = endpoints(element);
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+    ctx.strokeStyle = COLORS.vactrol;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx - 24, cy - 20, 48, 56);
+    line(ctx, x1, y1, cx - 24, cy - 8, 2, COLORS.vactrol);
+    line(ctx, x2, y2, cx + 24, cy - 8, 2, COLORS.vactrol);
+    line(ctx, cx - 16, cy + 12, cx - 16, cy + 30, 2, COLORS.vactrol);
+    line(ctx, cx + 16, cy + 12, cx + 16, cy + 30, 2, COLORS.vactrol);
+    circle(ctx, cx - 8, cy - 8, 6, COLORS.vactrol);
+    line(ctx, cx - 6, cy + 2, cx + 6, cy + 12, 2, COLORS.vactrol);
+    label(ctx, "VTL", cx, cy + 22, COLORS.vactrol);
   },
   ground(ctx, element) {
     const x = element.x;

@@ -30,6 +30,16 @@ export const DEFAULT_PARAMS = {
   inductor: { inductance_h: 1e-3 },
   diode: { is_a: 1e-12, emission: 1 },
   switch: { closed: 1, resistance_ohm: 1e-3 },
+  bjt: { beta: 100, is_a: 1e-12, emission: 1, pnp: 0 },
+  mosfet: { pnp: 0, vt: 1.5, beta: 0.02 },
+  vactrol: {
+    dark_resistance_ohm: 10e6,
+    resistance_at_1ma_ohm: 30e3,
+    response_exponent: 0.8,
+    minimum_resistance_ohm: 1.5e3,
+    turn_on_s: 2.5e-3,
+    turn_off_s: 8.403422185645153e-3,
+  },
 };
 
 function clone(elements) {
@@ -51,7 +61,20 @@ export class CircuitDocument {
 
   nodesFor(kind, x, y, x2, y2) {
     if (kind === "ground") return [nodeId(x, y)];
-    return [nodeId(x, y), nodeId(x2, y2)];
+    const first = nodeId(x, y);
+    const second = nodeId(x2, y2);
+    if (kind === "bjt" || kind === "mosfet") {
+      return [first, second, nodeId(x2, y2 + GRID * 2)];
+    }
+    if (kind === "vactrol") {
+      return [
+        first,
+        nodeId(x, y + GRID * 2),
+        second,
+        nodeId(x2, y2 + GRID * 2),
+      ];
+    }
+    return [first, second];
   }
 
   commit(change) {
@@ -62,8 +85,10 @@ export class CircuitDocument {
     return true;
   }
 
-  add(kind, x, y, x2 = x + GRID * 4, y2 = y) {
-    const id = `d${this.nextId++}`;
+  add(kind, x, y, x2 = x + GRID * 4, y2 = y, requestedId = null) {
+    const generated = `d${this.nextId++}`;
+    const id = requestedId || generated;
+    if (this.find(id)) return null;
     this.commit((elements) => {
       elements.push({
         id,

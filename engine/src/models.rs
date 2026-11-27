@@ -132,6 +132,51 @@ static INDUCTOR_PARAMS: &[ParamSpec] = &[ParamSpec {
     description: "Inductance (H)",
 }];
 
+static VACTROL_PARAMS: &[ParamSpec] = &[
+    ParamSpec {
+        key: "dark_resistance_ohm",
+        default: 10e6,
+        positive: true,
+        binary: false,
+        description: "LED-off cell resistance (ohms)",
+    },
+    ParamSpec {
+        key: "resistance_at_1ma_ohm",
+        default: 30e3,
+        positive: true,
+        binary: false,
+        description: "Cell resistance at 1 mA LED current (ohms)",
+    },
+    ParamSpec {
+        key: "response_exponent",
+        default: 0.8,
+        positive: true,
+        binary: false,
+        description: "Power-law exponent of the LED/cell transfer curve",
+    },
+    ParamSpec {
+        key: "minimum_resistance_ohm",
+        default: 1.5e3,
+        positive: true,
+        binary: false,
+        description: "Clamped minimum cell resistance (ohms)",
+    },
+    ParamSpec {
+        key: "turn_on_s",
+        default: 2.5e-3,
+        positive: true,
+        binary: false,
+        description: "Conductance rise time constant (s)",
+    },
+    ParamSpec {
+        key: "turn_off_s",
+        default: 8.403422185645153e-3,
+        positive: true,
+        binary: false,
+        description: "Conductance decay time constant (s)",
+    },
+];
+
 static DIODE_PARAMS: &[ParamSpec] = &[
     ParamSpec {
         key: "is_a",
@@ -207,6 +252,13 @@ pub static MODELS: &[ModelSpec] = &[
         params: DIODE_PARAMS,
     },
     ModelSpec {
+        kind: "vactrol",
+        terminals: &["led_anode", "led_cathode", "cell_a", "cell_b"],
+        nonlinear: true,
+        description: "Four-terminal resistive optocoupler with first-order cell conductance",
+        params: VACTROL_PARAMS,
+    },
+    ModelSpec {
         kind: "switch",
         terminals: &["a", "b"],
         nonlinear: false,
@@ -258,7 +310,7 @@ mod tests {
     fn registry_covers_supported_kinds() {
         for kind in [
             "wire", "ground", "resistor", "voltage_source", "current_source", "capacitor",
-            "inductor", "diode", "switch", "bjt", "mosfet",
+            "inductor", "diode", "switch", "bjt", "mosfet", "vactrol",
         ] {
             assert!(model_spec(kind).is_some(), "missing {kind}");
         }

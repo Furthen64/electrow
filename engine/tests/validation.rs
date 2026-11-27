@@ -202,6 +202,11 @@ fn mosfet_linear_fixture() {
 }
 
 #[test]
+fn vactrol_fixture() {
+    run_fixture("10-vactrol.json");
+}
+
+#[test]
 fn falstad_import_fixtures() {
     for name in ["08-falstad-divider.json", "09-unsupported-import.json"] {
         let fixture = fixture(name);
@@ -253,6 +258,7 @@ fn document_round_trip_fixtures() {
         "02-rc-step.json",
         "04-rlc-settling.json",
         "07-mosfet-linear.json",
+        "10-vactrol.json",
     ] {
         let fixture = fixture(name);
         let document = circuit_doc::parse_document(&fixture.get("circuit").unwrap().to_json()).unwrap();

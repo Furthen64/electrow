@@ -35,11 +35,11 @@ Additional integration checks in `engine/tests/validation.rs`: document round tr
 
 ## Test counts and commands
 
-- `cargo test --workspace`: **102 passed, 0 failed, 1 ignored benchmark** (91 unit + 11 fixture/integration tests).
+- `cargo test --workspace`: **105 passed, 0 failed, 1 ignored benchmark** (93 unit + 12 fixture/integration tests, including the Task 10 Vactrol fixture).
 - `python tests/smoke.py`: real Rust worker, versioned protocol, solver round trip, file endpoints, error mapping, run driver — **SMOKE OK**.
 - `python tests/test_api.py`: 5 Python API/HTTP tests — **OK**.
 - `python tests/boundary_bench.py`: measured worker overhead (`snapshot` 0.104 ms mean, `step` 0.092 ms mean on the development machine).
-- `./tests/run_browser_ui.sh`: 13 browser checks against the real UI (divider 5 V, Run/scope, palette, undo/redo, file round trip, Falstad import) — all pass; screenshots in `Temp/browser-ui/`.
+- `./tests/run_browser_ui.sh`: 15 browser checks against the real UI (divider 5 V, Run/scope, palette, undo/redo, keyboard shortcuts, unsaved badge, BJT preset, file round trip, Falstad import) — all pass; screenshots in `Temp/browser-ui/`.
 - `.github/workflows/ci.yml` runs the Rust, Python and browser jobs on push/PR and uploads browser screenshots.
 
 ## Deliberate deviations from the references
