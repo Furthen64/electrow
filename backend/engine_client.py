@@ -150,13 +150,20 @@ class EngineClient:
         process = self.process
         self.process = None
         self.running = False
-        if process is not None and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=2)
+        if process is not None:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+            for stream in (process.stdin, process.stdout):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
 
     def stop(self):
         with self.lock:
@@ -172,6 +179,13 @@ class EngineClient:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=2)
+            if process is not None:
+                for stream in (process.stdin, process.stdout):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
             self.process = None
             self.running = False
         if self._driver_thread is not None:

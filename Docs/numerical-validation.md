@@ -1,46 +1,53 @@
-# Task 03 numerical validation (initial)
+# Task 08 — numerical and integration validation
 
-Status: Task 03 gate passed (2026-11-26). This is the first slice of [Task 08](../Tasks/08-validation.md); broader fixture generation and reference trace capture remain in Task 08.
+Status: gate passed (2026-11-27). This document is the validation report for the MVP solver, imports, protocol, backend and browser editor.
 
 ## Fixture provenance
 
-All current fixtures are independently authored analytic circuits in `engine/src/solver.rs` tests. No code or golden waveform was copied from `ref_SEVA77/`, `ref_Vactrol/` or `ref_LVLabs/`. Reference fixtures identified for later comparison are recorded in [reference-analysis.md](reference-analysis.md) §9 (`auto-tests/capac.txt`, `lrc.txt`, `fullrect-sc.txt`, `ota-vca.txt`, etc.); they are not imported or redistributed here.
+- All fixtures live in `tests/fixtures/` and carry `id`, `version: 1`, `source`, input document/dump, solver settings and explicit expected values with absolute/relative tolerances.
+- Analytic fixtures are independently authored from closed-form solutions; no waveform was copied from `ref_SEVA77/`, `ref_Vactrol/` or `ref_LVLabs/`. Falstad-syntax fixtures use the supported dump grammar and are independently authored.
+- Reference execution was **not available**: the three donor snapshots are Java/GWT source trees with no built binary or runnable harness in this repository. No donor traces are claimed and no golden data was invented. Reference versions used for algorithm mapping remain Vactrol `c0b264e462fb8935c09b0e2a4dfa884debbde6b5` (upstream 4.1.4js), LVLabs 4.1.3js and SEVA77 1.3.2 / 3.1.3js. Capturing donor traces is an open Task 08 follow-up if a donor runtime becomes available.
 
-Reference snapshots used for algorithm mapping: Vactrol upstream 4.1.4js (commit `c0b264e462fb8935c09b0e2a4dfa884debbde6b5`), LVLabs 4.1.3js, SEVA77 1.3.2 / 3.1.3js. Reference executables were not run in this slice, so no reference traces are claimed.
+## Fixtures and results
 
-## Results
+| Fixture | Source | Check | Expected | Tolerance | Result |
+|---|---|---|---:|---:|---|
+| `01-divider-dc.json` | analytic | midpoint / current | 5 V / 5 mA | 1e-9 V / 1e-9 A | pass |
+| `01-divider-dc.json` | analytic | KCL residual at n2 | 0 A | 1e-9 A | pass |
+| `02-rc-step.json` | analytic | Vc at one τ (1 ms) | 6.3206 V | 0.05 V | pass |
+| `03-rl-step.json` | analytic | I at one τ (1 ms) | 63.21 mA | 5 mA | pass |
+| `04-rlc-settling.json` | analytic | first peak / settled Vc | 14–18 V / 10 V | range / 0.1 V | pass |
+| `05-diode-forward.json` | analytic | Vd / Id | 0.576 V / 4.42 mA | 0.02 V / 0.2 mA | pass |
+| `06-bjt-switching.json` | analytic | Vbe / Vc / Ic | 0.4–0.8 V / 0–10 V / > 0 | range | pass |
+| `07-mosfet-linear.json` | analytic | Vgs / Vds / Ids | 5 V / 3 V / 0.12 A | 1e-9 / 1e-9 / 5 mA | pass |
+| `08-falstad-divider.json` | supported dump | 5 elements, 0 unsupported, shared junction | exact | pass |
+| `09-unsupported-import.json` | supported dump | 1 element, 1 unsupported `403` record | exact | pass |
 
-Command: `cargo test --workspace` → **19 passed, 0 failed** (11 solver, 6 protocol/state, 2 JSON).
-
-| Check | Analytic expectation | Tolerance | Result |
-|---|---|---:|---|
-| `stamps_matrix_and_solves_known_system` | resistor + MNA voltage source, `V=[10,10]`, source current 0 | 1e-9 V/A | pass |
-| `singular_matrix_is_diagnosed` | rank-deficient matrix rejected | exact diagnostic | pass |
-| `resistive_divider_matches_analytic_result` | 10 V across two 1 kΩ resistors → midpoint 5 V, current 5 mA | 1e-9 V / 1e-9 A | pass |
-| `rc_transient_matches_analytic_time_constant` | 10 V, 1 kΩ, 1 µF, 200 × 5 µs = 1 τ → `10(1-e^-1) ≈ 6.321 V` | 0.05 V | pass |
-| `rl_transient_matches_analytic_time_constant` | 10 V, 100 Ω, 0.1 H, 1 τ → `(10/100)(1-e^-1) ≈ 63.2 mA` | 5 mA | pass |
-| `diode_converges_to_shockley_operating_point` | 5 V, 1 kΩ, `Is=1e-12`, `Vt=0.025865` → `Vd ≈ 0.576 V`, `Id ≈ 4.42 mA` | 0.02 V / 0.2 mA | pass |
-| `floating_nodes_and_singular_matrices_are_reported` | resistor island reports `FloatingNode`, solve reports `SingularMatrix` | exact diagnostic kinds | pass |
-| `invalid_parameters_are_rejected` | zero resistance / unknown element rejected at edit time | exact diagnostic kind | pass |
-| `rejected_step_restores_previous_accepted_state` | forced `NonConvergence` leaves state and time unchanged | exact equality | pass |
-| `repeated_runs_are_deterministic` | identical circuits produce identical node voltages and time | exact equality | pass |
-| `wires_merge_nodes` | wire merges `n2`/`n3` into one node | exact node list | pass |
-
-Integration check: `python tests/smoke.py` drives the real Rust worker through the HTTP API, builds a 10 V divider over the protocol, steps once and verifies the midpoint is 5 V within 1e-6 V, the subscribed measurement matches, simulated time is 5 µs, and a disconnected resistor reports `floating_node`. Result: `SMOKE OK`.
+Additional integration checks in `engine/tests/validation.rs`: document round trips for four fixtures, deterministic repeated runs, reset-to-zero state/time, rejected-step rollback with `NonConvergence`, topology-edit-induced floating nodes and singular solves, and parameter validation.
 
 ## Tolerance rationale
 
-- Divider/stamps use 1e-9 because the linear solve is deterministic and the values are exact rationals in f64.
-- RC/RL use 0.05 V / 5 mA because trapezoidal integration at `dt/τ = 0.005` introduces a small discretization error relative to the continuous analytic result; this is a discretization comparison, not a reference-trace comparison.
-- Diode uses 0.02 V / 0.2 mA because the Shockley operating point is solved by Newton iteration with a 0.01 V stopping rule and a 0.1 V step limit.
-- Diagnostics and determinism are compared exactly because they are discrete outcomes.
+- Linear DC and ideal-source checks use 1e-9 because the dense solve is deterministic and values are exact rationals in f64.
+- RC/RL use 0.05 V and 5 mA because trapezoidal integration at `dt/τ = 0.005` has a small discretization error versus the continuous analytic result.
+- RLC uses a peak *range* (underdamped overshoot depends on the companion-model discretization) and a 0.1 V settling band after ten envelope time constants.
+- Diode/BJT/MOSFET tolerances reflect the 0.01 V Newton stopping rule and 0.1 V step limit; MOSFET current uses a 5 mA band around the square-law result.
+- Diagnostic, import and determinism checks are exact because they are discrete outcomes.
 
-## Deliberate deviations from reference behavior
+## Test counts and commands
 
-Documented in [solver-algorithms.md](solver-algorithms.md) §5–8: trapezoidal only (no backward Euler option), no `gmin` ramp, 0.1 V Newton step limit, no `1e8` floating-node resistor, dense-only solve, diode breakdown not implemented. None of these alter the analytic fixtures above; they become reference-comparison items in Task 08.
+- `cargo test --workspace`: **102 passed, 0 failed, 1 ignored benchmark** (91 unit + 11 fixture/integration tests).
+- `python tests/smoke.py`: real Rust worker, versioned protocol, solver round trip, file endpoints, error mapping, run driver — **SMOKE OK**.
+- `python tests/test_api.py`: 5 Python API/HTTP tests — **OK**.
+- `python tests/boundary_bench.py`: measured worker overhead (`snapshot` 0.104 ms mean, `step` 0.092 ms mean on the development machine).
+- `./tests/run_browser_ui.sh`: 13 browser checks against the real UI (divider 5 V, Run/scope, palette, undo/redo, file round trip, Falstad import) — all pass; screenshots in `Temp/browser-ui/`.
+- `.github/workflows/ci.yml` runs the Rust, Python and browser jobs on push/PR and uploads browser screenshots.
+
+## Deliberate deviations from the references
+
+Documented in [solver-algorithms.md](solver-algorithms.md): trapezoidal integration only, no `gmin` ramp, 0.1 V Newton step limit, no hidden `1e8` Ω floating-node resistor, dense-only LU with a relative pivot threshold, diode breakdown not implemented. None of these change the analytic fixtures above; donor-trace comparison remains open. AC waveforms, controlled sources, op-amps and digital gates are not part of the MVP, so a true diode rectifier fixture is deferred rather than fabricated.
 
 ## Not yet validated
 
-- Golden waveform comparison against donor `auto-tests/` fixtures (Task 08).
-- KCL residual checks, frequency/settling checks, import/export round trips, reconnection and browser smoke tests (Tasks 05–08).
-- Performance measurements (Task 09).
+- Reference-trace comparison against donor `auto-tests/` fixtures when a donor runtime is available.
+- KCL residual sweep across nonlinear and reactive circuits (currently checked on the DC divider fixture).
+- Long-duration stability and frequency-domain checks beyond the RLC settling fixture.

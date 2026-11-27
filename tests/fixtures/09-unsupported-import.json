@@ -1,0 +1,13 @@
+{
+  "id": "unsupported-record-import",
+  "version": 1,
+  "source": "independently-authored dump",
+  "description": "Unsupported scope record (403) must be reported, not substituted with a supported model.",
+  "format": "falstad-text",
+  "dump": "$ 0 5.0E-6 10 63 10.0\nr 0 0 1 1 0 1000\n403 300 300 340 300 1\n",
+  "checks": [
+    {"type": "element_count", "expected": 1},
+    {"type": "unsupported_count", "expected": 1},
+    {"type": "unsupported_token", "expected": "403"}
+  ]
+}

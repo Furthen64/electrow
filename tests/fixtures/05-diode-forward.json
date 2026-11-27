@@ -1,0 +1,22 @@
+{
+  "id": "diode-forward",
+  "version": 1,
+  "source": "analytic",
+  "description": "5 V through 1 kohm into a Shockley diode (Is=1e-12): Vd ~ 0.576 V, Id ~ 4.42 mA.",
+  "circuit": {
+    "format": "electrow-circuit",
+    "version": 1,
+    "circuit_id": "fixture-diode",
+    "elements": [
+      {"id": "gnd", "kind": "ground", "nodes": ["gnd"]},
+      {"id": "v1", "kind": "voltage_source", "nodes": ["n1", "gnd"], "params": {"voltage_v": 5}},
+      {"id": "r1", "kind": "resistor", "nodes": ["n1", "n2"], "params": {"resistance_ohm": 1000}},
+      {"id": "d1", "kind": "diode", "nodes": ["n2", "gnd"], "params": {"is_a": 1e-12}}
+    ]
+  },
+  "settings": {"dt_s": 5e-6, "steps": 200},
+  "checks": [
+    {"type": "node", "id": "n2", "expected": 0.576, "atol": 0.02},
+    {"type": "current", "id": "d1", "expected": 0.00442, "atol": 0.0002}
+  ]
+}

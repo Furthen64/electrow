@@ -1,0 +1,23 @@
+{
+  "id": "rlc-settling",
+  "version": 1,
+  "source": "analytic",
+  "description": "Underdamped series RLC (100 ohm, 0.1 H, 1 uF, 10 V): overshoot above 14 V, settled to 10 V after 10 ms.",
+  "circuit": {
+    "format": "electrow-circuit",
+    "version": 1,
+    "circuit_id": "fixture-rlc",
+    "elements": [
+      {"id": "gnd", "kind": "ground", "nodes": ["gnd"]},
+      {"id": "v1", "kind": "voltage_source", "nodes": ["n1", "gnd"], "params": {"voltage_v": 10}},
+      {"id": "r1", "kind": "resistor", "nodes": ["n1", "n2"], "params": {"resistance_ohm": 100}},
+      {"id": "l1", "kind": "inductor", "nodes": ["n2", "n3"], "params": {"inductance_h": 0.1}},
+      {"id": "c1", "kind": "capacitor", "nodes": ["n3", "gnd"], "params": {"capacitance_f": 1e-6}}
+    ]
+  },
+  "settings": {"dt_s": 5e-6, "steps": 2000},
+  "checks": [
+    {"type": "peak", "id": "n3", "min": 14.0, "max": 18.0},
+    {"type": "node", "id": "n3", "expected": 10.0, "atol": 0.1}
+  ]
+}

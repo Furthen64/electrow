@@ -1,0 +1,23 @@
+{
+  "id": "mosfet-linear",
+  "version": 1,
+  "source": "analytic",
+  "description": "NMOS with Vgs=5 V, Vds=3 V, vt=1.5 V, beta=0.02: Ids = beta*((vgs-vt)*vds - vds^2/2) = 0.12 A.",
+  "circuit": {
+    "format": "electrow-circuit",
+    "version": 1,
+    "circuit_id": "fixture-mosfet",
+    "elements": [
+      {"id": "gnd", "kind": "ground", "nodes": ["gnd"]},
+      {"id": "vg", "kind": "voltage_source", "nodes": ["ng", "gnd"], "params": {"voltage_v": 5}},
+      {"id": "vd", "kind": "voltage_source", "nodes": ["nd", "gnd"], "params": {"voltage_v": 3}},
+      {"id": "m1", "kind": "mosfet", "nodes": ["ng", "gnd", "nd"], "params": {"vt": 1.5, "beta": 0.02}}
+    ]
+  },
+  "settings": {"dt_s": 5e-6, "steps": 50},
+  "checks": [
+    {"type": "node", "id": "ng", "expected": 5.0, "atol": 1e-9},
+    {"type": "node", "id": "nd", "expected": 3.0, "atol": 1e-9},
+    {"type": "current", "id": "m1", "expected": 0.12, "atol": 0.005}
+  ]
+}

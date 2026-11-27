@@ -1,0 +1,23 @@
+{
+  "id": "divider-dc",
+  "version": 1,
+  "source": "analytic",
+  "description": "10 V across two 1 kohm resistors: midpoint 5 V and branch current 5 mA.",
+  "circuit": {
+    "format": "electrow-circuit",
+    "version": 1,
+    "circuit_id": "fixture-divider",
+    "elements": [
+      {"id": "gnd", "kind": "ground", "nodes": ["gnd"]},
+      {"id": "v1", "kind": "voltage_source", "nodes": ["n1", "gnd"], "params": {"voltage_v": 10}},
+      {"id": "r1", "kind": "resistor", "nodes": ["n1", "n2"], "params": {"resistance_ohm": 1000}},
+      {"id": "r2", "kind": "resistor", "nodes": ["n2", "gnd"], "params": {"resistance_ohm": 1000}}
+    ]
+  },
+  "settings": {"dt_s": 5e-6, "steps": 1},
+  "checks": [
+    {"type": "node", "id": "n2", "expected": 5.0, "atol": 1e-9},
+    {"type": "current", "id": "r1", "expected": 0.005, "atol": 1e-9}
+  ],
+  "kcl": [{"node": "n2", "atol": 1e-9}]
+}

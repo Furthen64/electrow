@@ -1,0 +1,24 @@
+{
+  "id": "bjt-switching",
+  "version": 1,
+  "source": "analytic",
+  "description": "NPN common-emitter: 10 V via 1 Mohm to base and 1 kohm to collector. Base junction 0.4-0.8 V, collector 0-10 V, Ic = beta * Ib.",
+  "circuit": {
+    "format": "electrow-circuit",
+    "version": 1,
+    "circuit_id": "fixture-bjt",
+    "elements": [
+      {"id": "gnd", "kind": "ground", "nodes": ["gnd"]},
+      {"id": "v1", "kind": "voltage_source", "nodes": ["n1", "gnd"], "params": {"voltage_v": 10}},
+      {"id": "rb", "kind": "resistor", "nodes": ["n1", "n2"], "params": {"resistance_ohm": 1000000}},
+      {"id": "rc", "kind": "resistor", "nodes": ["n1", "n3"], "params": {"resistance_ohm": 1000}},
+      {"id": "q1", "kind": "bjt", "nodes": ["n2", "n3", "gnd"], "params": {"beta": 100, "is_a": 1e-12}}
+    ]
+  },
+  "settings": {"dt_s": 5e-6, "steps": 100},
+  "checks": [
+    {"type": "range", "id": "n2", "min": 0.4, "max": 0.8},
+    {"type": "range", "id": "n3", "min": 0.0, "max": 10.0},
+    {"type": "min", "id": "q1", "quantity": "current", "value": 0.0}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "falstad-divider-import",
+  "version": 1,
+  "source": "independently-authored dump in the supported Falstad syntax",
+  "description": "Supported Falstad text dump: one source, two resistors, two wires with shared junction nodes.",
+  "format": "falstad-text",
+  "dump": "$ 1 5.0E-6 10 63 10.0 62\nv 112 368 112 48 0 0 40.0 10.0 0.0\nw 112 48 240 48 0\nr 240 48 240 208 0 10000\nr 240 208 240 368 0 10000\nw 112 368 240 368 0\n",
+  "checks": [
+    {"type": "element_count", "expected": 5},
+    {"type": "unsupported_count", "expected": 0},
+    {"type": "node_shared", "a": "e3", "b": "e4", "a_index": 1, "b_index": 0}
+  ]
+}

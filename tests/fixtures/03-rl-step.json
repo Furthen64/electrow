@@ -1,0 +1,21 @@
+{
+  "id": "rl-step",
+  "version": 1,
+  "source": "analytic",
+  "description": "10 V through 100 ohm into 0.1 H; after one time constant (1 ms) I = 0.1(1-e^-1).",
+  "circuit": {
+    "format": "electrow-circuit",
+    "version": 1,
+    "circuit_id": "fixture-rl",
+    "elements": [
+      {"id": "gnd", "kind": "ground", "nodes": ["gnd"]},
+      {"id": "v1", "kind": "voltage_source", "nodes": ["n1", "gnd"], "params": {"voltage_v": 10}},
+      {"id": "r1", "kind": "resistor", "nodes": ["n1", "n2"], "params": {"resistance_ohm": 100}},
+      {"id": "l1", "kind": "inductor", "nodes": ["n2", "gnd"], "params": {"inductance_h": 0.1}}
+    ]
+  },
+  "settings": {"dt_s": 5e-6, "steps": 200},
+  "checks": [
+    {"type": "current", "id": "l1", "expected": 0.06321, "atol": 0.005}
+  ]
+}

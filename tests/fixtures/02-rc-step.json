@@ -1,0 +1,21 @@
+{
+  "id": "rc-step",
+  "version": 1,
+  "source": "analytic",
+  "description": "10 V through 1 kohm into 1 uF; after one time constant (1 ms) Vc = 10(1-e^-1).",
+  "circuit": {
+    "format": "electrow-circuit",
+    "version": 1,
+    "circuit_id": "fixture-rc",
+    "elements": [
+      {"id": "gnd", "kind": "ground", "nodes": ["gnd"]},
+      {"id": "v1", "kind": "voltage_source", "nodes": ["n1", "gnd"], "params": {"voltage_v": 10}},
+      {"id": "r1", "kind": "resistor", "nodes": ["n1", "n2"], "params": {"resistance_ohm": 1000}},
+      {"id": "c1", "kind": "capacitor", "nodes": ["n2", "gnd"], "params": {"capacitance_f": 1e-6}}
+    ]
+  },
+  "settings": {"dt_s": 5e-6, "steps": 200},
+  "checks": [
+    {"type": "node", "id": "n2", "expected": 6.3206, "atol": 0.05}
+  ]
+}
